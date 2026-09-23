@@ -44,9 +44,9 @@ table{width:100%;margin-top:1rem;font-size:.72rem;border-collapse:collapse}
 th,td{text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--faint)}
 th{color:var(--subtle);font-weight:500;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em}
 a{color:var(--flux);text-decoration:none}a:hover{text-decoration:underline}
-ul{list-style:none;margin-top:.6rem}
-ul li{padding-left:2rem;position:relative;margin-bottom:.7rem;line-height:1.65;font-size:.85rem}
-ul li::before{content:"▸";position:absolute;left:0;top:.15rem;color:var(--flux);font-size:.75rem;width:1.2rem;text-align:center}
+ul{list-style:disc;margin-top:.6rem;padding-left:1.5rem}
+ul li{margin-bottom:.7rem;line-height:1.65;font-size:.85rem}
+ul li::marker{color:var(--flux);font-size:.9em}
 .tiny{font-size:.7rem;color:var(--faint);margin-top:1rem;line-height:1.6}
 .verdict{margin-top:1rem;padding:1rem 1.2rem;border-radius:12px;font-size:.85rem;line-height:1.7}
 .v-safe{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.25)}
@@ -428,34 +428,56 @@ async function scanDue() {
     return;
   }
 
-  // Other tokens: try live query with 5-second timeout
-  out.innerHTML = '<div class="spinner">querying ' + token + '… (if this hangs, the Ergo explorer is under load)</div>';
-  const tid = Object.entries(TN).find(([id, n]) => n === token)?.[0];
-  if (!tid) { out.innerHTML = '<div class="spinner">Unknown token.</div>'; return; }
+  // Other tokens: use REST API (api.ergoplatform.com) — CORS-enabled, reliable
+  out.innerHTML = '<div class="spinner">scanning ' + token + ' on-chain…</div>';
+  var tid2 = null;
+  for (var idKey in TN) { if (TN[idKey] === token) { tid2 = idKey; break; } }
+  if (!tid2) { out.innerHTML = 'Unknown token.'; return; }
 
-  const h = approxHeight();
+  var h2 = approxHeight();
   try {
-    // 5-second timeout wrapper
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), 5000)
-    );
-    const fetchPromise = gql(
-      'query($t:String!){boxes(take:50,skip:0,tokenId:$t,spent:false){boxId address value creationHeight assets{tokenId amount}}}',
-      {t: tid}
-    );
-    const d = await Promise.race([fetchPromise, timeoutPromise]);
-    const boxes = (d.boxes || []).map(b => ({
-      boxId: b.boxId, addr: b.address, erg: parseInt(b.value) / 1e9, amt: 0,
-      elig: b.creationHeight + STORAGE, dust: parseInt(b.value) < 150000000
-    }));
-    const inWin = boxes.filter(b => b.elig > h && b.elig <= h + days * 708 && b.dust);
-    if (inWin.length > 0) {
-      renderDue(boxes, h, token, days);
+    // REST API: fetch unspent boxes for this token (sorted by creation height)
+    // CORS-enabled, works from browser
+    var allBoxes = [];
+    for (var offset = 0; offset < 500; offset += 100) {
+      var resp = await fetch('https://api.ergoplatform.com/api/v1/boxes/byTokenId/' + tid2 + '?limit=100&offset=' + offset);
+      var data = await resp.json();
+      if (!data.items || !data.items.length) break;
+      for (var j = 0; j < data.items.length; j++) {
+        var box = data.items[j];
+        if (box.spentTransactionId) continue;
+        var bErg = parseInt(box.value) / 1e9;
+        if (bErg >= 0.15) continue;
+        // Check if this token is in the box's assets
+        var hasToken = false; var tokenAmt = 0;
+        if (box.assets) {
+          for (var k = 0; k < box.assets.length; k++) {
+            if (box.assets[k].tokenId === tid2) {
+              hasToken = true;
+              tokenAmt = parseInt(box.assets[k].amount);
+              break;
+            }
+          }
+        }
+        if (!hasToken) continue;
+        allBoxes.push({
+          boxId: box.boxId,
+          addr: box.address || 'unknown',
+          erg: bErg,
+          amt: tokenAmt,
+          elig: box.creationHeight + STORAGE,
+          dust: true
+        });
+      }
+      if (data.items.length < 100) break;
+    }
+    if (allBoxes.length === 0) {
+      out.innerHTML = '<div class="verdict v-safe">No underfunded ' + token + ' boxes found in the first 500 boxes on-chain.</div>';
     } else {
-      out.innerHTML = '<div class="verdict v-warn">No underfunded ' + token + ' boxes found in first page (50). The explorer may not have complete data — use <b>BOX SAFETY</b> above to check any specific address.</div>';
+      renderDue(allBoxes, h2, token, days);
     }
   } catch(e) {
-    out.innerHTML = '<div class="verdict v-warn"><b>Live ' + token + ' scan unavailable</b> — the Ergo explorer is currently under heavy load.<br>Use the <b>BOX SAFETY</b> tab above to check any specific address instantly.</div>';
+    out.innerHTML = '<div class="verdict v-warn"><b>' + token + ' scan error:</b> ' + (e.message || e) + '<br>Try again or use BOX SAFETY above.</div>';
   }
 }
 
