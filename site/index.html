@@ -290,21 +290,62 @@ async function checkSwept() {
 }
 document.getElementById('addr-swept').addEventListener('keydown',e=>{if(e.key==='Enter')checkSwept()});
 
-async function scanDue(){const out=document.getElementById('due-result'),token=document.getElementById('due-token').value,days=parseInt(document.getElementById('due-days').value);
-out.innerHTML='<div class="spinner">scanning…</div>';
-try{const h=await curH().catch(()=>1879500);
-if(token==='Flux'){if(!SNAP){out.innerHTML='<div class="spinner">loading…</div>';return}
-const boxes=[];Object.entries(SNAP.addresses).forEach(([addr,rec])=>{rec.boxes.forEach(b=>{boxes.push({boxId:b.boxId,addr,erg:b.erg,amt:b.flux,elig:b.rentEligibleHeight,dust:b.erg<0.15})})});
-renderDue(boxes,h,'Flux',days);return}
-const tid=Object.entries(TN).find(([id,n])=>n===token)?.[0];
-if(!tid){out.innerHTML='<div class="spinner">Unknown.</div>';return}
-try{const d=await gql(`query($t:String!){boxes(take:50,skip:0,tokenId:$t,spent:false){boxId address value creationHeight assets{tokenId amount}}}`,{t:tid});
-const boxes=(d.boxes||[]).map(b=>({boxId:b.boxId,addr:b.address,erg:parseInt(b.value)/1e9,amt:0,elig:b.creationHeight+STORAGE,dust:parseInt(b.value)<150000000}));
-const inWin=boxes.filter(b=>b.elig>h&&b.elig<=h+days*708&&b.dust);
-if(inWin.length>0)renderDue(boxes,h,token,days);
-else out.innerHTML=`<div class="verdict v-warn">No underfunded ${token} boxes found in first page. Explorer may be under load — try <b>BOX SAFETY</b> for specific addresses.</div>`;
-}catch(e){out.innerHTML=`<div class="verdict v-warn">Live ${token} scan unavailable — explorer under load. Use <b>BOX SAFETY</b> above.</div>`}
-}catch(e){out.innerHTML=`<div class="spinner">${e.message}</div>`}}
+// Compute approximate current height from timestamp (no network needed)
+function approxHeight() {
+  // Anchor: height 1,878,293 at 2026-09-21 23:00:58 UTC (1790031658736 ms)
+  const ANCHOR_H = 1878293, ANCHOR_MS = 1790031658736;
+  return Math.round(ANCHOR_H + (Date.now() - ANCHOR_MS) / (SPB * 1000));
+}
+
+async function scanDue() {
+  const out = document.getElementById('due-result');
+  const token = document.getElementById('due-token').value;
+  const days = parseInt(document.getElementById('due-days').value);
+
+  // Flux: compute locally from snapshot — instant, zero network calls
+  if (token === 'Flux') {
+    if (!SNAP) { out.innerHTML = '<div class="spinner">snapshot loading…</div>'; return; }
+    const h = approxHeight();
+    const boxes = [];
+    Object.entries(SNAP.addresses).forEach(([addr, rec]) => {
+      rec.boxes.forEach(b => {
+        boxes.push({boxId: b.boxId, addr, erg: b.erg, amt: b.flux, elig: b.rentEligibleHeight, dust: b.erg < 0.15});
+      });
+    });
+    renderDue(boxes, h, 'Flux', days);
+    return;
+  }
+
+  // Other tokens: try live query with 5-second timeout
+  out.innerHTML = '<div class="spinner">querying ' + token + '… (if this hangs, the Ergo explorer is under load)</div>';
+  const tid = Object.entries(TN).find(([id, n]) => n === token)?.[0];
+  if (!tid) { out.innerHTML = '<div class="spinner">Unknown token.</div>'; return; }
+
+  const h = approxHeight();
+  try {
+    // 5-second timeout wrapper
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 5000)
+    );
+    const fetchPromise = gql(
+      'query($t:String!){boxes(take:50,skip:0,tokenId:$t,spent:false){boxId address value creationHeight assets{tokenId amount}}}',
+      {t: tid}
+    );
+    const d = await Promise.race([fetchPromise, timeoutPromise]);
+    const boxes = (d.boxes || []).map(b => ({
+      boxId: b.boxId, addr: b.address, erg: parseInt(b.value) / 1e9, amt: 0,
+      elig: b.creationHeight + STORAGE, dust: parseInt(b.value) < 150000000
+    }));
+    const inWin = boxes.filter(b => b.elig > h && b.elig <= h + days * 708 && b.dust);
+    if (inWin.length > 0) {
+      renderDue(boxes, h, token, days);
+    } else {
+      out.innerHTML = '<div class="verdict v-warn">No underfunded ' + token + ' boxes found in first page (50). The explorer may not have complete data — use <b>BOX SAFETY</b> above to check any specific address.</div>';
+    }
+  } catch(e) {
+    out.innerHTML = '<div class="verdict v-warn"><b>Live ' + token + ' scan unavailable</b> — the Ergo explorer is currently under heavy load.<br>Use the <b>BOX SAFETY</b> tab above to check any specific address instantly.</div>';
+  }
+}
 
 function renderDue(boxes,h,label,days){const out=document.getElementById('due-result'),hi=h+days*708;
 const due=boxes.filter(b=>b.elig>h&&b.elig<=hi&&b.dust),nowC=boxes.filter(b=>b.elig<=h&&b.dust);
