@@ -1,0 +1,76 @@
+{
+ "description": "Known storage-rent collector/sweeper bot addresses on Ergo. Compiled from a 30-day on-chain audit (Sep 2026). All data is public blockchain data \u2014 verify on any Ergo explorer.",
+ "methodology": "Addresses identified as the signed (funding) inputs in transactions that spent boxes via unsigned rent-collection. These are the operations that profit from Ergo's storage-rent confiscation branch.",
+ "bots": [
+  {
+   "address": "9fRw3bMzSNBuZNmBJd3VAJGf7XQmFfeiebJ989LvTNdxmcz3vEd",
+   "label": "Collector-A (principal operator)",
+   "lifetime_txs": 77532,
+   "role": "commercial rent collector",
+   "notes": "Largest known operation. Split the Flux bridge reserve 50/50 with Collector-B. Returned funds in full.",
+   "boxes_taken_30d": 40730,
+   "unique_victims_30d": 4590,
+   "erg_in_boxes_30d": 7866846.86
+  },
+  {
+   "address": "9giveR3jEGvQS61H2SDQpPdLbpVT1T9JYpvW5yTmocs4ZpUEQ7z",
+   "label": "Collector-B",
+   "lifetime_txs": 29547,
+   "role": "commercial rent collector",
+   "notes": "Second operation. Co-operated with full return of Flux bridge reserve.",
+   "boxes_taken_30d": 1703,
+   "unique_victims_30d": 951,
+   "erg_in_boxes_30d": 187050.98
+  },
+  {
+   "address": "9fjmEQAxNMG3rxw9d3jdrkaXs99n9NPT9KUPbZkFJVS6V2fJQ29",
+   "label": "Collector-B-ops",
+   "lifetime_txs": 3,
+   "role": "operational address of Collector-B",
+   "notes": "Held the returned Flux temporarily before bridge return."
+  },
+  {
+   "address": "88dhgzEuTXaSHzYbKw9DUrnRfpP1JDrQnkXpdiHfaJ7FZhcMng4239QXgNZ3FxbKoG435t9FBcSYoVEK",
+   "label": "Miner fee sink (timelock)",
+   "lifetime_txs": null,
+   "role": "miner reward collection",
+   "notes": "Where the drain-block miner's fee payments consolidate (720-block timelock). This is how miners are paid for including confiscation transactions."
+  }
+ ],
+ "stats_30d": {
+  "collector-B": {
+   "label": "collector-B",
+   "sweep_txs_30d": 1283,
+   "boxes_taken_30d": 1703,
+   "erg_in_boxes_30d": 187050.98,
+   "unique_victims_30d": 951,
+   "top_tokens": {
+    "ergopad": 456,
+    "ogre": 431,
+    "NETA": 168,
+    "Mi Goreng": 105,
+    "None": 72,
+    "COMET": 65,
+    "kushti": 48,
+    "WT_ADA": 47
+   }
+  },
+  "collector-A": {
+   "label": "collector-A",
+   "sweep_txs_30d": 3116,
+   "boxes_taken_30d": 40730,
+   "erg_in_boxes_30d": 7866846.86,
+   "unique_victims_30d": 4590,
+   "top_tokens": {
+    "ogre": 851,
+    "ergopad": 814,
+    "NETA": 197,
+    "Mi Goreng": 132,
+    "None": 109,
+    "SigUSD": 34,
+    "COMET": 17,
+    "eTOSI": 15
+   }
+  }
+ }
+}
