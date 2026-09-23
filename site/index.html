@@ -3,472 +3,322 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flux on Ergo — Claims & Ergo Box Safety Tools</title>
+<title>Flux on Ergo — Claims & Box Safety Tools</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-         background: #0b0e14; color: #d7dde8; min-height: 100vh;
-         display: flex; flex-direction: column; align-items: center; padding: 2.5rem 1rem 4rem; }
-  .card { width: 100%; max-width: 760px; background: #111622; border: 1px solid #232b3d;
-          border-radius: 12px; padding: 2rem; margin-bottom: 1.2rem; }
-  h1 { font-size: 1.15rem; color: #fbbf24; letter-spacing: .04em; margin-bottom: .35rem; }
-  h2 { font-size: .95rem; color: #fbbf24; letter-spacing: .04em; margin: 1.4rem 0 .8rem; }
-  .sub { color: #8792a6; font-size: .8rem; margin-bottom: 1.4rem; line-height: 1.5; }
-  .tabs { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
-  .tab { padding: .55rem 1rem; border: 1px solid #2a3450; border-radius: 8px; background: #0b0e14;
-         color: #8792a6; font: inherit; font-size: .78rem; cursor: pointer; }
-  .tab.active { border-color: #fbbf24; color: #fbbf24; }
-  input { width: 100%; padding: .8rem 1rem; background: #0b0e14; color: #d7dde8;
-          border: 1px solid #2a3450; border-radius: 8px; font: inherit; font-size: .85rem; }
-  input:focus { outline: none; border-color: #fbbf24; }
-  button.go { margin-top: .8rem; width: 100%; padding: .8rem; background: #fbbf24; color: #111;
-           border: none; border-radius: 8px; font: inherit; font-weight: 700; cursor: pointer; }
-  button.go:hover { background: #fcd34d; }
-  .bal { font-size: 1.9rem; color: #fbbf24; }
-  .addr { font-size: .75rem; color: #8792a6; word-break: break-all; margin-top: .3rem; }
-  .note { margin-top: 1rem; font-size: .75rem; color: #8792a6; line-height: 1.6;
-          border-top: 1px solid #232b3d; padding-top: 1rem; }
-  .flag { color: #f87171; }
-  .ok { color: #34d399; }
-  .warn { color: #fbbf24; }
-  .crit { color: #f87171; font-weight: 700; }
-  table { width: 100%; margin-top: 1rem; font-size: .72rem; border-collapse: collapse; }
-  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #1b2233; }
-  th { color: #8792a6; font-weight: 400; }
-  .zero { color: #8792a6; }
-  a { color: #fbbf24; }
-  ul { list-style: none; margin-top: .6rem; }
-  ul li { padding-left: 1.1rem; position: relative; margin-bottom: .5rem; line-height: 1.55; }
-  ul li::before { content: "▸"; position: absolute; left: 0; color: #fbbf24; }
-  .tiny { font-size: .7rem; color: #5c6878; margin-top: 1rem; line-height: 1.6; }
-  .facts { font-size: .8rem; line-height: 1.8; color: #aeb8c9; }
-  .facts b { color: #fbbf24; }
-  .facts .big { font-size: 1rem; }
-  .verdict { margin-top: 1rem; padding: .9rem 1rem; border-radius: 8px; font-size: .85rem; line-height: 1.6; }
-  .v-safe { background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.35); }
-  .v-warn { background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.35); }
-  .v-crit { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.4); }
-  .spinner { display: inline-block; color: #8792a6; font-size: .8rem; }
-  .meta { margin-top: 1rem; font-size: .7rem; color: #5c6878; line-height: 1.7; }
+:root{--bg:#0B0F1E;--card:#111827;--card2:#1E293B;--border:#1E3A5F;--flux:#3B82F6;--flux-light:#60A5FA;--flux-dim:#1E40AF;--text:#E2E8F0;--subtle:#64748B;--faint:#334155;--ok:#10B981;--warn:#F59E0B;--crit:#EF4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:0 1rem 4rem}
+.hero{width:100%;max-width:820px;text-align:center;padding:2.5rem 0 1.5rem}
+.hero .logos{display:flex;justify-content:center;align-items:center;gap:1.2rem;margin-bottom:1rem}
+.hero .logo-flux{display:flex;align-items:center;gap:.5rem;font-size:1.5rem;font-weight:800;color:var(--flux)}
+.hero .logo-flux svg{width:28px;height:28px}
+.hero .divider{color:var(--faint);font-size:1.2rem}
+.hero .logo-ergo{display:flex;align-items:center;gap:.4rem;font-size:1.1rem;font-weight:700;color:var(--subtle)}
+.hero .logo-ergo svg{width:22px;height:22px;opacity:.7}
+.hero h1{font-size:1.5rem;font-weight:800;margin-bottom:.4rem}
+.hero .sub{color:var(--subtle);font-size:.85rem;line-height:1.6;max-width:620px;margin:0 auto}
+.hero .badges{display:flex;justify-content:center;gap:.5rem;flex-wrap:wrap;margin-top:1rem}
+.hero .badge{display:inline-flex;align-items:center;gap:.35rem;padding:.35rem .75rem;border-radius:99px;font-size:.72rem;font-weight:600;background:var(--card);border:1px solid var(--border);color:var(--subtle)}
+.hero .badge a{color:var(--flux);text-decoration:none}
+.hero .badge a:hover{text-decoration:underline}
+.hero .badge .dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.card{width:100%;max-width:820px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:1.8rem;margin-bottom:1rem}
+.tabs{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1.4rem}
+.tab{padding:.55rem 1rem;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--subtle);font:inherit;font-size:.78rem;font-weight:600;cursor:pointer;transition:all .15s}
+.tab:hover{border-color:var(--flux);color:var(--flux-light)}
+.tab.active{border-color:var(--flux);color:var(--flux);background:var(--flux-dim)}
+.desc{color:var(--subtle);font-size:.82rem;line-height:1.6;margin-bottom:1.2rem}
+.desc b{color:var(--text)}
+input{width:100%;padding:.8rem 1rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;font:inherit;font-size:.85rem}
+input:focus{outline:none;border-color:var(--flux);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+input::placeholder{color:var(--faint)}
+.go{margin-top:.7rem;width:100%;padding:.8rem;background:var(--flux);color:#fff;border:none;border-radius:10px;font:inherit;font-weight:700;cursor:pointer}
+.go:hover{background:var(--flux-light)}
+.bal{font-size:2.1rem;font-weight:800;color:var(--flux)}
+.addr{font-size:.72rem;color:var(--subtle);word-break:break-all;margin-top:.3rem}
+.note{margin-top:1rem;font-size:.74rem;color:var(--subtle);line-height:1.6;border-top:1px solid var(--border);padding-top:1rem}
+.flag{color:var(--crit)}.ok{color:var(--ok)}.warn{color:var(--warn)}.crit{color:var(--crit);font-weight:700}
+table{width:100%;margin-top:1rem;font-size:.72rem;border-collapse:collapse}
+th,td{text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--faint)}
+th{color:var(--subtle);font-weight:500;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em}
+a{color:var(--flux);text-decoration:none}a:hover{text-decoration:underline}
+ul{list-style:none;margin-top:.6rem}
+ul li{padding-left:1.2rem;position:relative;margin-bottom:.6rem;line-height:1.6;font-size:.85rem}
+ul li::before{content:"▸";position:absolute;left:0;color:var(--flux)}
+.tiny{font-size:.7rem;color:var(--faint);margin-top:1rem;line-height:1.6}
+.verdict{margin-top:1rem;padding:1rem 1.2rem;border-radius:12px;font-size:.85rem;line-height:1.7}
+.v-safe{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.25)}
+.v-warn{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.25)}
+.v-crit{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
+.spinner{display:inline-block;color:var(--subtle);font-size:.8rem}
+.meta{margin-top:1rem;font-size:.7rem;color:var(--faint);line-height:1.7}
+.banner{padding:1.2rem;border-radius:12px;margin-bottom:1.2rem;font-size:.82rem;line-height:1.7;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2)}
+.banner b{color:var(--flux)}
+.story-section h2{font-size:1rem;font-weight:700;color:var(--flux);margin:1.5rem 0 .8rem}
+.story-section p{font-size:.86rem;line-height:1.75;margin-bottom:.9rem}
+.story-section .highlight{font-size:1rem;color:var(--flux);font-weight:700}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;margin:1.2rem 0}
+.stat{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:1rem;text-align:center}
+.stat .num{font-size:1.6rem;font-weight:800;color:var(--flux)}
+.stat .lbl{font-size:.68rem;color:var(--subtle);margin-top:.3rem;text-transform:uppercase;letter-spacing:.05em}
+.links-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.8rem;margin-top:1.2rem}
+.link-card{display:block;background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:1.1rem;text-decoration:none;transition:all .15s}
+.link-card:hover{border-color:var(--flux);text-decoration:none;transform:translateY(-1px)}
+.link-card .lc-title{font-size:.85rem;font-weight:700;color:var(--flux);margin-bottom:.3rem}
+.link-card .lc-desc{font-size:.72rem;color:var(--subtle);line-height:1.5}
+select{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:.6rem;font:inherit;font-size:.78rem}
+.footer{margin-top:2rem;text-align:center;font-size:.7rem;color:var(--faint);line-height:1.8}
+.footer a{color:var(--subtle)}
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>FLUX ON ERGO — CLAIMS &amp; ERGO BOX SAFETY TOOLS</h1>
-  <div class="sub">
-    Tools for the Ergo community: check your <b>FLUX claim</b> (snapshot at block 1,878,291), check
-    <b>box safety</b>, check if you've been <b>swept</b>, see what's <b>coming due</b>,
-    and see the <b>known bots</b> operating on the chain.
-    Live tools query Zelcore's public Ergo nodes (graphql.erg-1/erg.zelcore.io) from your browser.
+<div class="hero">
+  <div class="logos">
+    <div class="logo-flux"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>FLUX</div>
+    <span class="divider">×</span>
+    <div class="logo-ergo"><svg viewBox="0 0 24 24" fill="currentColor" opacity=".6"><path d="M12 2L2 7v10l10 5 10-5V7l-10-5zm0 2.3L19.5 8 12 11.7 4.5 8 12 4.3zM4 9.6l7 3.5v6.8l-7-3.5V9.6zm16 0v6.8l-7 3.5v-6.8l7-3.5z"/></svg>ERGO</div>
   </div>
-  <div class="tabs">
-    <button class="tab active" data-t="claims">FLUX CLAIM</button>
-    <button class="tab" data-t="safety">BOX SAFETY</button>
-    <button class="tab" data-t="swept">HAVE I BEEN SWEPT?</button>
-    <button class="tab" data-t="due">COMING DUE</button>
-    <button class="tab" data-t="bots">KNOWN BOTS</button>
-    <button class="tab" data-t="story">WHAT HAPPENED</button>
-  </div>
-
-  <!-- TAB: CLAIMS -->
-  <div id="tab-claims">
-    <input id="addr-claims" placeholder="Paste your Ergo address (9…)" spellcheck="false">
-    <button class="go" onclick="checkClaims()">Check FLUX balance</button>
-    <div id="claims-result"></div>
-    <div class="note" id="claims-note" style="display:none">
-      Rent-eligible dates are informational only — <b>claims are snapshot-based; moving or losing boxes
-      after the snapshot does not affect your claim.</b>
-      <div id="claims-boxes"></div>
-    </div>
-    <div class="meta" id="claims-meta">loading snapshot…</div>
-  </div>
-
-  <!-- TAB: SAFETY -->
-  <div id="tab-safety" style="display:none">
-    <div class="sub" style="margin-bottom:1rem">
-      On Ergo, a box unmoved for 4 years (1,051,200 blocks) can be spent by <b>anyone</b> if it holds
-      under ~0.15 ERG — the whole box, tokens included. This checks your <b>current</b> unspent boxes
-      against that clock, live.
-    </div>
-    <input id="addr-safety" placeholder="Paste any Ergo address (9…)" spellcheck="false">
-    <button class="go" onclick="checkSafety()">Check box safety</button>
-    <div id="safety-result"></div>
-    <div class="tiny">Rule of thumb: every token-holding box needs ≥ 0.15 ERG to survive its 4-year
-      anniversary (1+ ERG = decades). Consolidate old boxes into funded ones. This tool is not a wallet
-      and never sees your keys — it reads public chain data only.</div>
-  </div>
-
-  <!-- TAB: SWEPT -->
-  <div id="tab-swept" style="display:none">
-    <div class="sub" style="margin-bottom:1rem">
-      Storage-rent sweeps spend boxes <b>without any signature</b>. Enter an address to see if any of its
-      boxes were ever taken that way — when, what was inside, and the transaction IDs.
-    </div>
-    <input id="addr-swept" placeholder="Paste any Ergo address (9…)" spellcheck="false">
-    <button class="go" onclick="checkSwept()">Check sweep history</button>
-    <div id="swept-result"></div>
-    <div class="tiny">Scans up to 400 recent transactions per address. A box counts as swept when it was
-      spent by a transaction carrying <b>no proof bytes</b> for it — the signature of a storage-rent
-      collection. Public chain data only.</div>
-  </div>
-
-  <!-- TAB: BOTS -->
-  <div id="tab-bots" style="display:none">
-    <div class="sub" style="margin-bottom:1rem">
-      Known storage-rent collector/sweeper bot addresses on the Ergo chain, from our 30-day audit.
-      All public blockchain data — verify on any explorer. These are the operations that profit from Ergo's confiscation branch.
-    </div>
-    <div id="bots-content">Loading…</div>
-    <div class="tiny">
-      Why publish this? Transparency. If your boxes are being swept by one of these addresses,
-      you can see it here. If a new bot appears, the community can identify and list it.
-      The Community Shield Bot (also in this repo — <code>bot/shield.js</code>) is designed to
-      out-compete these harvesters and hold collected funds at a public, reclaimable address.
-    </div>
-  </div>
-
-  <!-- TAB: STORY -->
-  <div id="tab-story" style="display:none">
-    <div class="facts">
-      On 2026-09-21 at 23:00 UTC, Ergo's "storage rent" rule allowed automated collectors to take
-      <b>415,000,000 FLUX</b> — 94.3% of all Flux on the chain — from the bridge reserve,
-      <b>without a single signature</b>. On Ergo, any box unmoved for four years with too little ERG
-      can be claimed by anyone. Median survival once a box becomes claimable: <b>6 minutes</b>.
-      In the following 30 days, two operators claimed <b>42,433 boxes from 5,402 addresses</b>.
-      <span class="big">Destruction is a bug; harvesting is an industry.</span>
-    </div>
-    <h2>WHAT THIS MEANS FOR FLUX HOLDERS</h2>
-    <ul>
-      <li><b>All funds are safe on Flux and parallel-asset chains thanks to Fusion. No user funds were lost.</b> The snapshot (two blocks before the drain) honors every balance 1:1 in native FLUX. Unclaimed Fusion snapshot balances and mining rewards remain claimable on the Flux main chain.</li>
-      <li><b>Claims open inside Fusion</b> in early October — no other site is legitimate. Anything claiming to be a Flux–Ergo portal outside Fusion is a scam.</li>
-      <li><b>Do not buy FLUX on Ergo.</b> Tokens acquired after 2026-09-21 22:54:55 UTC carry no claim.</li>
-      <li><b>If you hold any asset on Ergo</b>: keep at least 1 ERG on every token box, and consolidate boxes older than ~3 years — use the BOX SAFETY tab above.</li>
-    </ul>
-    <div class="tiny">
-      Snapshot: 4,775 boxes · 2,847 addresses · 24,997,505.71 FLUX total ·
-      483,623.36 FLUX user-claimable across 2,842 addresses (bridge reserve and Flux team wallets excluded).
-      Produced with the official RunOnFlux holder-snapshot tool at height 1,878,291 and cross-validated
-      by an independent full-chain audit. The taken reserve was <b>returned in full within 24 hours</b>
-      (verified on-chain) and the operators received a 100,000 FLUX critical bug bounty.
-      We also submitted EIP-0049 to Ergo (github.com/ergoplatform/eips/pull/107) — a complete protocol fix.
-Full evidence: github.com/RunOnFlux/flux-ergo-claims
-    </div>
-  <!-- TAB: DUE -->
-  <div id="tab-due" style="display:none">
-    <div class="sub" style="margin-bottom:1rem">
-      Boxes becoming rent-eligible (claimable by anyone if underfunded) in the chosen window.
-      FLUX scans instantly from the published snapshot; other tokens query the Ergo chain live.
-    </div>
-    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-      <select id="due-days" style="background:#0b0e14;color:#d7dde8;border:1px solid #2a3450;border-radius:8px;padding:.6rem;font:inherit;font-size:.8rem">
-        <option value="7">next 7 days</option>
-        <option value="30" selected>next 30 days</option>
-        <option value="90">next 90 days</option>
-      </select>
-      <select id="due-token" style="background:#0b0e14;color:#d7dde8;border:1px solid #2a3450;border-radius:8px;padding:.6rem;font:inherit;font-size:.8rem">
-        <option value="Flux">Flux (snapshot, instant)</option>
-        <option value="NETA">NETA (live)</option>
-        <option value="ergopad">ergopad (live)</option>
-        <option value="COMET">COMET (live)</option>
-        <option value="SigUSD">SigUSD (live)</option>
-        <option value="WT_ADA">WT_ADA (live)</option>
-        <option value="WT_ERG">WT_ERG (live)</option>
-        <option value="ogre">ogre (live)</option>
-      </select>
-      <button class="go" style="margin-top:0;flex:1" onclick="scanDue()">Scan</button>
-    </div>
-    <div id="due-result" style="margin-top:1.2rem"></div>
-    <div class="tiny">Live scans page through the Ergo explorer (Zelcore nodes) over the exact
-      creation window that maps to the chosen eligibility window; capped at 2,000 boxes per scan.
-      Boxes shown as underfunded (&lt;0.15 ERG) are whole-box claimable on their date. Public chain data.</div>
-  </div>
-
+  <h1>Claims & Box Safety Tools</h1>
+  <p class="sub">Check your FLUX claim, verify box safety, detect sweep history, see what's coming due, and read the full story.</p>
+  <div class="badges">
+    <span class="badge"><span class="dot"></span> All funds safe on Flux</span>
+    <span class="badge"><a href="https://github.com/RunOnFlux/flux-ergo-claims">GitHub →</a></span>
+    <span class="badge"><a href="https://github.com/ergoplatform/eips/pull/107">EIP-0049 →</a></span>
+    <span class="badge"><a href="https://runonflux.com">runonflux.com</a></span>
   </div>
 </div>
 
+<div class="card">
+<div class="tabs">
+  <button class="tab active" data-t="claims">⚡ FLUX CLAIM</button>
+  <button class="tab" data-t="safety">🛡 BOX SAFETY</button>
+  <button class="tab" data-t="swept">🔍 BEEN SWEPT?</button>
+  <button class="tab" data-t="due">⏰ COMING DUE</button>
+  <button class="tab" data-t="bots">🤖 KNOWN BOTS</button>
+  <button class="tab" data-t="story">📖 FULL STORY</button>
+</div>
+
+<div id="tab-claims">
+  <div class="desc">Balance at <b>block 1,878,291</b> (Sep 21, 2026). Every balance honored <b>1:1 in Fusion</b>.
+  <br>Unclaimed Fusion snapshot balances and mining rewards remain claimable on Flux main chain.</div>
+  <input id="addr-claims" placeholder="Paste your Ergo address (9…)" spellcheck="false">
+  <button class="go" onclick="checkClaims()">Check FLUX balance</button>
+  <div id="claims-result"></div>
+  <div class="note" id="claims-note" style="display:none">Rent dates are informational — <b>claims are snapshot-based.</b><div id="claims-boxes"></div></div>
+  <div class="meta" id="claims-meta">loading…</div>
+</div>
+
+<div id="tab-safety" style="display:none">
+  <div class="banner">On Ergo, a box unmoved for <b>4 years</b> can be claimed by <b>anyone</b> if under <b>~0.15 ERG</b> — the whole box, tokens included.</div>
+  <input id="addr-safety" placeholder="Paste any Ergo address (9…)" spellcheck="false">
+  <button class="go" onclick="checkSafety()">Check box safety</button>
+  <div id="safety-result"></div>
+  <div class="tiny">Every token box needs ≥0.15 ERG (1+ ERG = decades). Public data only — never touches keys.</div>
+</div>
+
+<div id="tab-swept" style="display:none">
+  <div class="desc">Storage-rent sweeps spend boxes <b>without any signature</b>. Check if an address was ever swept.</div>
+  <input id="addr-swept" placeholder="Paste any Ergo address (9…)" spellcheck="false">
+  <button class="go" onclick="checkSwept()">Check sweep history</button>
+  <div id="swept-result"></div>
+  <div class="tiny">Scans up to 400 transactions. "Swept" = spent with no proof bytes.</div>
+</div>
+
+<div id="tab-due" style="display:none">
+  <div class="desc">Boxes becoming rent-eligible in the selected window.</div>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem">
+    <select id="due-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select>
+    <select id="due-token"><option value="Flux">Flux</option><option value="NETA">NETA</option><option value="ergopad">ergopad</option><option value="COMET">COMET</option><option value="SigUSD">SigUSD</option></select>
+    <button class="go" style="margin-top:0;flex:1;min-width:100px" onclick="scanDue()">Scan</button>
+  </div>
+  <div id="due-result"></div>
+  <div class="tiny">Flux scans instantly from snapshot. Live token scans query Ergo explorer — if unavailable, use <b>BOX SAFETY</b> for specific addresses.</div>
+</div>
+
+<div id="tab-bots" style="display:none">
+  <div class="desc">Known storage-rent collector addresses from 30-day audit. Public blockchain data.</div>
+  <div id="bots-content">Loading…</div>
+  <div class="tiny">Community Shield Bot: <a href="https://github.com/RunOnFlux/flux-ergo-claims">GitHub</a></div>
+</div>
+
+<div id="tab-story" style="display:none">
+  <div class="banner" style="border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)"><b style="color:var(--crit)">⚠ ERGO CHAIN WARNING</b> — All funds are safe on Flux and PA chains thanks to Fusion. On Ergo, anyone can claim a box unmoved for 4 years without your private key. This is not an exploit — it is Ergo's "storage rent," running at industrial scale.</div>
+  <div class="story-section">
+    <h2>What happened</h2>
+    <p>At 22:57 UTC on September 21, 2026, the Flux bridge reserve on Ergo held <b>415,000,000 FLUX</b> — 94.3% of all Flux on the chain. Three minutes and twenty-seven seconds later, it held nothing.</p>
+    <p>No private key was stolen. No signature was forged. No bug was exploited. Ergo's protocol simply permits strangers to take dormant funds — and ten blocks after our reserve became eligible, automated collectors did.</p>
+    <div class="stats-grid">
+      <div class="stat"><div class="num">415M</div><div class="lbl">FLUX taken</div></div>
+      <div class="stat"><div class="num">3m 27s</div><div class="lbl">Time to drain</div></div>
+      <div class="stat"><div class="num">0</div><div class="lbl">Signatures</div></div>
+      <div class="stat"><div class="num">94.3%</div><div class="lbl">Of supply</div></div>
+    </div>
+    <h2>The evidence — 30 days</h2>
+    <div class="stats-grid">
+      <div class="stat"><div class="num">42,433</div><div class="lbl">Boxes claimed</div></div>
+      <div class="stat"><div class="num">5,402</div><div class="lbl">Victim addresses</div></div>
+      <div class="stat"><div class="num">6 min</div><div class="lbl">Median survival</div></div>
+      <div class="stat"><div class="num">100%</div><div class="lbl">Claimed <24h</div></div>
+    </div>
+    <p>Two operators claimed 42,433 boxes from 5,402 addresses — including stablecoins, wrapped assets, staking keys, and NFTs.</p>
+    <p class="highlight">Destruction is a bug; harvesting is an industry.</p>
+    <h2>For Flux holders — you are covered</h2>
+    <ul>
+      <li><b>All funds safe</b> on Flux and PA chains thanks to Fusion</li>
+      <li><b>Every Ergo balance honored 1:1</b> — snapshot at block 1,878,291</li>
+      <li><b>483,623.36 FLUX / 2,842 addresses claimable</b> — check in the FLUX CLAIM tab</li>
+      <li><b>Fusion rewards claimable on main chain</b> — nothing lost</li>
+      <li><b>Claims open in Fusion</b> early October</li>
+      <li><b>Do not buy FLUX on Ergo</b> — post-snapshot carries no claim</li>
+    </ul>
+    <h2>The return — within 24 hours</h2>
+    <p>The operators returned the bridge reserve <b>in full within 24 hours</b>. We granted a <b>100,000 FLUX critical bug bounty</b> for the responsible disclosure.</p>
+    <h2>This aligns with our roadmap</h2>
+    <p>Flux's <a href="https://runonflux.com">published roadmap</a> already scheduled consolidating parallel assets and becoming infrastructure for agents — this expedites that timeline. We will not hold users' funds on a chain with a built-in timer, period.</p>
+    <h2>Our response</h2>
+    <div class="links-grid">
+      <a class="link-card" href="https://github.com/ergoplatform/eips/pull/107"><div class="lc-title">EIP-0049: Prepaid Storage Rent</div><div class="lc-desc">Protocol fix: eliminates confiscation, preserves rent. Archived + revival model.</div></a>
+      <a class="link-card" href="https://github.com/RunOnFlux/flux-ergo-claims"><div class="lc-title">Evidence & Source</div><div class="lc-desc">30-day audit CSVs, snapshot data, shield bot. Open source.</div></a>
+      <a class="link-card" href="#" onclick="document.querySelector('[data-t=safety]').click();return false"><div class="lc-title">Box Safety Checker</div><div class="lc-desc">Live check any address — countdown, verdict, advice.</div></a>
+      <a class="link-card" href="#" onclick="document.querySelector('[data-t=swept]').click();return false"><div class="lc-title">Sweep Detector</div><div class="lc-desc">Check if an address was ever swept — dates, amounts, tx IDs.</div></a>
+    </div>
+    <h2>Act now</h2>
+    <p>We call on Ergo's leadership, miners, and community: ship rent-exempt minimums. Until then, we do not consider Ergo safe for token custody at global scale.</p>
+    <div class="meta" style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border)">
+      Verify: <a href="https://ergexplorer.com/transactions/bb3607fa4b3a2764534888b07bb196d60d94460897afc053c0e409fc81c5ca06">tx bb3607fa</a> ·
+      <a href="https://github.com/RunOnFlux/flux-ergo-claims">evidence</a> ·
+      <a href="https://ergoplatform.org/en/blog/2022-02-18-ergo-explainer-storage-rent/">Ergo's explainer</a>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="footer">
+  Built by <a href="https://runonflux.com">Flux</a> for the Ergo community ·
+  Data from <a href="https://graphql.erg.zelcore.io">Zelcore nodes</a> ·
+  <a href="https://github.com/RunOnFlux/flux-ergo-claims">GitHub</a> ·
+  <a href="https://github.com/ergoplatform/eips/pull/107">EIP-0049</a><br>
+  Reads public blockchain data only. Never touches private keys.
+</div>
+
 <script>
-/* ---------------- shared ---------------- */
-const FLUX_ID = 'e8b20745ee9d18817305f32eb21015831a48f02d40980de6e849f886dca7f807';
-const STORAGE = 1051200, SPB = 121.86, A0H = 827083, A0T = Date.UTC(2022,7,30,5,26)/1000;
-const TOKEN_NAMES = {
-  'e8b20745ee9d18817305f32eb21015831a48f02d40980de6e849f886dca7f807': 'Flux',
-  '472c3d4ecaa08fb7392ff041ee2e6af75f4a558810a74b28600549d5392810e8': 'NETA',
-  'd71693c49a84fbbecd4908c94813b46514b18b67a99952dc1e6e4791556de413': 'ergopad',
-  '0cd8c9f416e5b1ca9f986a7f10a84191dfb85941619e49e53c0dc30ebf83324b': 'COMET',
-  '03faf2cb329f2e90d6d23b58d91bbb6c046aa143261cc21f52fbe2824bfcbf04': 'SigUSD',
-  '003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0': 'SigRSV',
-  '30974274078845f263b4f21787e33cc99e9ec19a17ad85a5bc6da2cca91c5a2e': 'WT_ADA',
-  'ef802b475c06189fdbf844153cdc1d449a5ba87cce13d11bb47b5a539f27f12b': 'WT_ERG',
-  '6de6f46e5c3eca524d938d822e444b924dbffbe02e5d34bd9dcd4bbfe9e85940': 'ogre',
-};
-const GQL_ENDPOINTS = ['https://graphql.erg-1.zelcore.io', 'https://graphql.erg.zelcore.io'];
-let gqlEndpoint = 0;
+const FLUX_ID='e8b20745ee9d18817305f32eb21015831a48f02d40980de6e849f886dca7f807';
+const STORAGE=1051200,SPB=121.86,A0H=827083,A0T=Date.UTC(2022,7,30,5,26)/1000;
+const TN={[FLUX_ID]:'Flux','472c3d4ecaa08fb7392ff041ee2e6af75f4a558810a74b28600549d5392810e8':'NETA','d71693c49a84fbbecd4908c94813b46514b18b67a99952dc1e6e4791556de413':'ergopad','0cd8c9f416e5b1ca9f986a7f10a84191dfb85941619e49e53c0dc30ebf83324b':'COMET','03faf2cb329f2e90d6d23b58d91bbb6c046aa143261cc21f52fbe2824bfcbf04':'SigUSD'};
+const GQL=['https://graphql.erg-1.zelcore.io','https://graphql.erg.zelcore.io'];let ep=0;
+async function gql(q,v){for(let i=0;i<4;i++){try{const r=await fetch(GQL[(ep+i)%2],{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,variables:v})});const j=await r.json();if(j.errors)throw new Error(j.errors[0].message);ep=(ep+i)%2;return j.data}catch(e){}}throw new Error('Ergo nodes unreachable')}
+function h2d(h){return new Date((A0T+(h-A0H)*SPB)*1000).toISOString().slice(0,10)}
+function fmt(x){return Number(x).toLocaleString(undefined,{maximumFractionDigits:2})}
+function valid(a){return/^9[A-Za-z0-9]{50,}$/.test(a)}
+function tl(a){if(!a||!a.length)return'(ERG)';return a.map(x=>TN[x.tokenId]||x.tokenId.slice(0,8)+'…').join(', ')}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');['claims','safety','swept','due','bots','story'].forEach(n=>document.getElementById('tab-'+n).style.display=(n===t.dataset.t)?'':'none')}));
 
-async function gql(query, variables) {
-  for (let attempt = 0; attempt < GQL_ENDPOINTS.length * 2; attempt++) {
-    try {
-      const r = await fetch(GQL_ENDPOINTS[(gqlEndpoint + attempt) % GQL_ENDPOINTS.length], {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query, variables})
-      });
-      const j = await r.json();
-      if (j.errors) throw new Error(j.errors[0].message);
-      gqlEndpoint = (gqlEndpoint + attempt) % GQL_ENDPOINTS.length;
-      return j.data;
-    } catch (e) { /* try next endpoint */ }
-  }
-  throw new Error('Both Ergo GraphQL nodes (Zelcore) are unreachable. Try again shortly.');
-}
+let SNAP=null;
+fetch('snapshot.json').then(r=>r.json()).then(d=>{SNAP=d;const t=d.totals;
+document.getElementById('claims-meta').innerHTML=`<b style="color:var(--flux)">${fmt(t.fluxUserClaimable)} FLUX</b> claimable · ${t.userClaimableAddresses.toLocaleString()} addresses · block ${d.meta.snapshotHeight}`;
+}).catch(()=>document.getElementById('claims-meta').textContent='failed to load');
 
-function h2date(h) { return new Date((A0T + (h - A0H) * SPB) * 1000).toISOString().slice(0, 10); }
-function fmt(x) { return Number(x).toLocaleString(undefined, {maximumFractionDigits: 2}); }
-function validAddr(a) { return /^9[A-Za-z0-9]{50,}$/.test(a); }
-function tokensLabel(assets) {
-  if (!assets || !assets.length) return '(ERG only)';
-  return assets.map(a => (TOKEN_NAMES[a.tokenId] || a.tokenId.slice(0,8) + '…')).join(', ');
-}
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-  t.classList.add('active');
-  ['claims','safety','swept','due','bots','story'].forEach(n =>
-    document.getElementById('tab-' + n).style.display = (n === t.dataset.t) ? '' : 'none');
-}));
+function checkClaims(){const a=document.getElementById('addr-claims').value.trim(),out=document.getElementById('claims-result'),note=document.getElementById('claims-note'),bx=document.getElementById('claims-boxes');note.style.display='none';
+if(!SNAP){out.innerHTML='<div class="spinner">loading…</div>';return}
+if(!valid(a)){out.innerHTML='<div class="spinner">Enter an Ergo address (starts with "9").</div>';return}
+const r=SNAP.addresses[a],ex=SNAP.meta.excludedAddresses||{};
+if(!r){out.innerHTML='<div class="spinner">No FLUX at this address at snapshot.</div>';return}
+out.innerHTML=`<div class="bal">${fmt(r.flux)} FLUX</div><div class="addr">${a}</div><div class="addr">${r.boxes.length} box(es)`+(ex[a]?` · <span class="flag">${ex[a]} — NOT claimable</span>`:` · <span class="ok">claimable 1:1 in Fusion</span>`)+`</div>`;
+if(!r.boxes.length){note.style.display='block';bx.innerHTML='';return}
+let h='<table><tr><th>box</th><th>flux</th><th>erg</th><th>created</th><th>eligible</th></tr>';
+r.boxes.forEach(b=>{h+=`<tr><td>${b.boxId.slice(0,10)}…</td><td>${fmt(b.flux)}</td><td>${b.erg.toFixed(3)}</td><td>${h2d(b.createdHeight)}</td><td>${h2d(b.rentEligibleHeight)}</td></tr>`});
+bx.innerHTML=h+'</table>';note.style.display='block'}
+document.getElementById('addr-claims').addEventListener('keydown',e=>{if(e.key==='Enter')checkClaims()});
 
-/* ---------------- tab 5: known bots registry ---------------- */
-fetch('known-bots.json').then(r => r.json()).then(d => {
-  const el = document.getElementById('bots-content');
-  if (!el) return;
-  let html = '<table><tr><th>address</th><th>label</th><th>30d boxes</th><th>30d victims</th><th>notes</th></tr>';
-  for (const bot of d.bots) {
-    html += '<tr><td><a href="https://ergexplorer.com/addresses/' + bot.address + '" target="_blank">' + bot.address.slice(0,16) + '…</a></td>';
-    html += '<td>' + bot.label + '</td>';
-    const s = (d.stats_30d || {})[bot.address.split('').reverse().join('').slice(0,8)] || {};
-    html += '<td>' + (bot.boxes_taken_30d ? bot.boxes_taken_30d.toLocaleString() : '—') + '</td>';
-    html += '<td>' + (bot.unique_victims_30d ? bot.unique_victims_30d.toLocaleString() : '—') + '</td>';
-    html += '<td>' + bot.notes + '</td></tr>';
-  }
-  html += '</table>';
-  el.innerHTML = html;
-}).catch(() => document.getElementById('bots-content').innerHTML = 'failed to load known-bots.json');
+async function curH(){const d=await gql('{blockHeaders(take:1){height}}');return d.blockHeaders[0].height}
+async function getBoxes(a){const out=[];for(let s=0;s<1000;s+=50){const d=await gql(`query($a:String!,$s:Int!){boxes(take:50,skip:$s,address:$a,spent:false){boxId value creationHeight assets{tokenId amount}}}`,{a,s});out.push(...d.boxes);if(d.boxes.length<50)break}return out}
 
-/* ---------------- tab 1: claims (snapshot.json) ---------------- */
-let SNAP = null;
-fetch('snapshot.json').then(r => r.json()).then(d => {
-  SNAP = d;
-  const t = d.totals;
-  document.getElementById('claims-meta').innerHTML =
-    `user-claimable: <b style="color:#fbbf24">${fmt(t.fluxUserClaimable)} FLUX</b> across ` +
-    `${t.userClaimableAddresses.toLocaleString()} addresses · snapshot block ${d.meta.snapshotHeight}`;
-}).catch(() => document.getElementById('claims-meta').textContent = 'failed to load snapshot.json');
+async function checkSafety(){const a=document.getElementById('addr-safety').value.trim(),out=document.getElementById('safety-result');
+if(!valid(a)){out.innerHTML='<div class="spinner">Enter an Ergo address.</div>';return}
+out.innerHTML='<div class="spinner">querying…</div>';
+try{const[h,bs]=await Promise.all([curH(),getBoxes(a)]);if(!bs.length){out.innerHTML='<div class="spinner">No unspent boxes.</div>';return}
+let w=0,rows='<table><tr><th>box</th><th>contents</th><th>erg</th><th>eligible</th><th>status</th></tr>';
+bs.slice().sort((a,b)=>a.creationHeight-b.creationHeight).forEach(b=>{const e=b.creationHeight+STORAGE,d=Math.round((e-h)*SPB/86400),erg=parseInt(b.value)/1e9,f=parseInt(b.value)>=150000000;let c,t;
+if(e<=h&&!f){c='crit';t='CLAIMABLE NOW';w=Math.max(w,4)}else if(e<=h&&f){c='warn';t='rent due';w=Math.max(w,3)}else if(d<=90&&!f){c='crit';t=`in ${d}d`;w=Math.max(w,3)}else if(!f){c='warn';t=`risk ${h2d(e)}`;w=Math.max(w,2)}else if(erg>=1){c='ok';t='safe';w=Math.max(w,0)}else{c='warn';t='bleed';w=Math.max(w,1)}
+rows+=`<tr><td>${b.boxId.slice(0,8)}…</td><td>${tl(b.assets)}</td><td>${erg.toFixed(3)}</td><td>${h2d(e)}</td><td class="${c}">${t}</td></tr>`});
+rows+='</table>';
+const v=[['v-safe','✓ All boxes funded — no whole-box takeover possible.'],['v-safe','✓ All boxes funded.'],['v-warn','⚠ Underfunded boxes — will be claimable at 4-year mark.'],['v-crit','⚠⚠ Box claimable within 90 days — consolidate NOW.'],['v-crit','⚠⚠⚠ BOXES CLAIMABLE BY ANYONE NOW. Move funds.']];
+out.innerHTML=`<div class="verdict ${v[w][0]}">${v[w][1]}</div><div class="tiny">height ${h.toLocaleString()} · ${bs.length} boxes</div>`+rows}catch(e){out.innerHTML=`<div class="spinner">${e.message}</div>`}}
+document.getElementById('addr-safety').addEventListener('keydown',e=>{if(e.key==='Enter')checkSafety()});
 
-function checkClaims() {
-  const a = document.getElementById('addr-claims').value.trim();
-  const out = document.getElementById('claims-result');
-  const note = document.getElementById('claims-note');
-  const bx = document.getElementById('claims-boxes');
-  note.style.display = 'none';
-  if (!SNAP) { out.innerHTML = '<div class="zero">snapshot still loading…</div>'; return; }
-  if (!validAddr(a)) { out.innerHTML = '<div class="zero">That does not look like an Ergo mainnet address (starts with “9”).</div>'; return; }
-  const rec = SNAP.addresses[a];
-  const excl = SNAP.meta.excludedAddresses || {};
-  if (!rec) { out.innerHTML = '<div class="zero">No FLUX held at this address at the snapshot block.</div>'; return; }
-  out.innerHTML = `<div class="bal">${fmt(rec.flux)} FLUX</div><div class="addr">${a}</div>` +
-    `<div class="addr">${rec.boxes.length} box${rec.boxes.length > 1 ? 'es' : ''} at snapshot` +
-    (excl[a] ? ` · <span class="flag">${excl[a]} — NOT user-claimable</span>`
-             : ` · <span class="ok">claimable 1:1 in Fusion</span>`) + `</div>`;
-  if (!rec.boxes.length) { note.style.display = 'block'; bx.innerHTML = ''; return; }
-  let rows = '<table><tr><th>box</th><th>flux</th><th>erg</th><th>created</th><th>rent-eligible*</th></tr>';
-  for (const b of rec.boxes) {
-    rows += `<tr><td>${b.boxId.slice(0,10)}…</td><td>${fmt(b.flux)}</td><td>${b.erg.toFixed(3)}</td>` +
-            `<td>${h2date(b.createdHeight)}</td><td>${h2date(b.rentEligibleHeight)}</td></tr>`;
-  }
-  bx.innerHTML = rows + '</table>';
-  note.style.display = 'block';
-}
-document.getElementById('addr-claims').addEventListener('keydown', e => { if (e.key === 'Enter') checkClaims(); });
-
-/* ---------------- tab 2: safety (live) ---------------- */
-async function currentHeight() {
-  const d = await gql('{ blockHeaders(take:1){ height } }');
-  return d.blockHeaders[0].height;
-}
-async function unspentBoxes(addr) {
-  const out = [];
-  for (let skip = 0; skip < 1000; skip += 50) {
-    const d = await gql(`query($a:String!,$s:Int!){ boxes(take:50, skip:$s, address:$a, spent:false){
-      boxId value creationHeight assets{ tokenId amount } } }`, {a: addr, s: skip});
-    out.push(...d.boxes);
-    if (d.boxes.length < 50) break;
-  }
-  return out;
-}
-async function checkSafety() {
-  const a = document.getElementById('addr-safety').value.trim();
-  const out = document.getElementById('safety-result');
-  if (!validAddr(a)) { out.innerHTML = '<div class="zero">Enter an Ergo mainnet address (starts with “9”).</div>'; return; }
-  out.innerHTML = '<div class="spinner">querying the Ergo chain…</div>';
-  try {
-    const [height, boxes] = await Promise.all([currentHeight(), unspentBoxes(a)]);
-    if (!boxes.length) { out.innerHTML = '<div class="zero">No unspent boxes at this address.</div>'; return; }
-    let worst = 0; // 0 safe, 1 bleed, 2 future risk, 3 due <90d, 4 claimable dust now, 5 rent due now
-    let rows = '<table><tr><th>box</th><th>contents</th><th>erg</th><th>rent-eligible</th><th>status</th></tr>';
-    const sorted = boxes.slice().sort((x,y) => (x.creationHeight - y.creationHeight));
-    for (const b of sorted) {
-      const elig = b.creationHeight + STORAGE;
-      const days = Math.round((elig - height) * SPB / 86400);
-      const erg = parseInt(b.value) / 1e9;
-      const funded = parseInt(b.value) >= 150000000;
-      let cls, txt;
-      if (elig <= height && !funded)      { cls='crit'; txt='CLAIMABLE BY ANYONE — NOW'; worst = Math.max(worst,4); }
-      else if (elig <= height && funded)  { cls='warn'; txt='rent due (~0.1 ERG), ERG returned'; worst = Math.max(worst,5); }
-      else if (days <= 90 && !funded)     { cls='crit'; txt=`whole box claimable in ${days}d`; worst = Math.max(worst,3); }
-      else if (erg >= 1)                  { cls='ok';   txt='funded — decades of cover'; worst = Math.max(worst,0); }
-      else                                { cls='warn'; txt='funded — rent bleed only'; worst = Math.max(worst,1); }
-      rows += `<tr><td>${b.boxId.slice(0,8)}…</td><td>${tokensLabel(b.assets)}</td><td>${erg.toFixed(3)}</td>` +
-              `<td>${h2date(elig)}</td><td class="${cls}">${txt}</td></tr>`;
-    }
-    rows += '</table>';
-    const verdicts = [
-      ['v-safe',  '✓ ALL BOXES FUNDED — no whole-box takeover possible. Rent may still be collected (~0.1 ERG per box per 4 years) by third parties.'],
-      ['v-safe',  '✓ All boxes funded — at most rent-bleed (~0.1 ERG / box / 4y).'],
-      ['v-warn',  '⚠ UNDERFUNDED BOXES PRESENT — at least one box will be whole-box claimable at its 4-year mark. Add ERG or consolidate.'],
-      ['v-crit',  '⚠⚠ BOX CLAIMABLE WITHIN 90 DAYS — consolidate NOW. Once eligible, the median box is taken within minutes.'],
-      ['v-crit',  '⚠⚠⚠ BOXES ARE CLAIMABLE BY ANYONE RIGHT NOW. Move these funds immediately.'],
-      ['v-crit',  '⚠ Rent is already collectable on your boxes (funded boxes: ~0.1 ERG each at a stranger’s initiative).'],
-    ];
-    out.innerHTML = `<div class="verdict ${verdicts[worst][0]}">${verdicts[worst][1]}</div>` +
-      `<div class="tiny">chain height: ${height.toLocaleString()} · ${boxes.length} unspent boxes</div>` + rows;
-  } catch (e) {
-    out.innerHTML = `<div class="zero">${String(e.message || e)}</div>`;
-  }
-}
-document.getElementById('addr-safety').addEventListener('keydown', e => { if (e.key === 'Enter') checkSafety(); });
-
-/* ---------------- tab 3: swept (live) ---------------- */
-async function addressTransactions(addr, maxTxs) {
-  const out = [];
-  for (let skip = 0; skip < maxTxs; skip += 50) {
-    const d = await gql(`query($a:String!,$s:Int!){ transactions(take:50, skip:$s, address:$a){
-      transactionId inclusionHeight timestamp
-      inputs{ proofBytes box{ address value creationHeight assets{ tokenId amount } } } } }`,
-      {a: addr, s: skip});
-    out.push(...d.transactions);
-    if (d.transactions.length < 50) break;
-  }
-  return out;
-}
+async function getTxs(a,m){const out=[];for(let s=0;s<m;s+=50){const d=await gql(`query($a:String!,$s:Int!){transactions(take:50,skip:$s,address:$a){transactionId inclusionHeight timestamp inputs{proofBytes box{address value creationHeight assets{tokenId amount}}}}}`,{a,s});out.push(...d.transactions);if(d.transactions.length<50)break}return out}
 async function checkSwept() {
   const a = document.getElementById('addr-swept').value.trim();
   const out = document.getElementById('swept-result');
-  if (!validAddr(a)) { out.innerHTML = '<div class="zero">Enter an Ergo mainnet address (starts with “9”).</div>'; return; }
-  out.innerHTML = '<div class="spinner">scanning transaction history…</div>';
-  try {
-    const txs = await addressTransactions(a, 400);
-    const sweeps = [];
-    for (const tx of txs) {
-      for (const i of (tx.inputs || [])) {
-        if (i.box && i.box.address === a && !i.proofBytes) {
-          sweeps.push({ tx: tx.transactionId, h: tx.inclusionHeight, ts: tx.timestamp,
-                        idle: tx.inclusionHeight - i.box.creationHeight,
-                        erg: parseInt(i.box.value) / 1e9, assets: i.box.assets });
-        }
-      }
-    }
-    sweeps.sort((x, y) => x.h - y.h);
-    if (!sweeps.length) {
-      out.innerHTML = `<div class="verdict v-safe">✓ NOT SWEPT — no storage-rent collection found among the ` +
-        `${txs.length} most recent transactions of this address.</div>`;
-      return;
-    }
-    let rows = '<table><tr><th>when (UTC)</th><th>idle</th><th>erg taken</th><th>contents</th><th>tx</th></tr>';
-    for (const s of sweeps) {
-      const past = s.idle - STORAGE;
-      rows += `<tr><td>${new Date(parseInt(s.ts)).toISOString().slice(0,16).replace('T',' ')}</td>` +
-        `<td>${(s.idle * SPB / 86400 / 365).toFixed(1)}y${past >= 0 ? ` (+${(past*SPB/86400).toFixed(0)}d past eligibility)` : ''}</td>` +
-        `<td>${s.erg.toFixed(4)}</td><td>${tokensLabel(s.assets)}</td>` +
-        `<td><a href="https://ergexplorer.com/transactions/${s.tx}" target="_blank">${s.tx.slice(0,10)}…</a></td></tr>`;
-    }
-    rows += '</table>';
-    const ergT = sweeps.reduce((t, s) => t + s.erg, 0);
-    out.innerHTML = `<div class="verdict v-crit">⚠⚠ THIS ADDRESS WAS SWEPT — ${sweeps.length} box(es) taken via ` +
-      `storage rent without any signature (${ergT.toFixed(4)} ERG plus tokens).</div>` + rows;
-  } catch (e) {
-    out.innerHTML = `<div class="zero">${String(e.message || e)}</div>`;
-  }
-}
-document.getElementById('addr-swept').addEventListener('keydown', e => { if (e.key === 'Enter') checkSwept(); });
-
-/* ---------------- tab 4: coming due scanner ---------------- */
-const TOKEN_IDS = {};
-Object.entries(TOKEN_NAMES).forEach(([id, name]) => TOKEN_IDS[name] = id);
-
-function renderDue(boxes, height, label, capped) {
-  const out = document.getElementById('due-result');
-  const days = parseInt(document.getElementById('due-days').value);
-  const hi = height + Math.round(days * 708);
-  const due = boxes.filter(b => b.elig > height && b.elig <= hi && b.dust);
-  const nowClaim = boxes.filter(b => b.elig <= height && b.dust);
-  due.sort((x, y) => x.elig - y.elig);
-  if (!due.length) {
-    out.innerHTML = `<div class="verdict v-safe">✓ No underfunded ${label} boxes become claimable in the next ${days} days.` +
-      (nowClaim.length ? ` (${nowClaim.length} already eligible — likely swept already)` : '') + `</div>`;
-    return;
-  }
-  let rows = '<table><tr><th>claimable from</th><th>erg</th><th>amount</th><th>address</th><th>box</th></tr>';
-  for (const b of due.slice(0, 500)) {
-    rows += `<tr><td>${h2date(b.elig)}</td><td>${b.erg.toFixed(3)}</td><td>${fmt(b.amt)}</td>` +
-            `<td>${b.address.slice(0,12)}…${b.address.slice(-6)}</td>` +
-            `<td><a href="https://ergexplorer.com/boxes/${b.boxId}" target="_blank">${b.boxId.slice(0,8)}…</a></td></tr>`;
-  }
-  rows += '</table>';
-  const ergT = due.reduce((t, b) => t + b.erg, 0);
-  const amtT = due.reduce((t, b) => t + b.amt, 0);
-  out.innerHTML = `<div class="verdict v-warn">⚠ ${due.length.toLocaleString()} underfunded ${label} boxes
-    (≈ ${fmt(amtT)} ${label}, ${ergT.toFixed(2)} ERG across ${new Set(due.map(b => b.address)).size} addresses)
-    become claimable by anyone in the next ${days} days.${capped ? ' (scan capped at 2,000 boxes)' : ''}</div>` + rows;
-}
-
-async function scanDue() {
-  const out = document.getElementById('due-result');
-  const token = document.getElementById('due-token').value;
-  const days = parseInt(document.getElementById('due-days').value);
+  if (!valid(a)) { out.innerHTML = '<div class="spinner">Enter an Ergo address.</div>'; return; }
   out.innerHTML = '<div class="spinner">scanning…</div>';
   try {
-    const height = await currentHeight().catch(() => null) || 1879000;
-    if (token === 'Flux') {
-      if (!SNAP) { throw new Error('snapshot data not loaded yet — try again in a moment'); }
-      const boxes = [];
-      for (const [addr, rec] of Object.entries(SNAP.addresses)) {
-        for (const b of rec.boxes) {
-          boxes.push({ boxId: b.boxId, address: addr, erg: b.erg, amt: b.flux,
-                       elig: b.rentEligibleHeight, dust: b.erg < 0.15 });
+    const t = await getTxs(a, 400);
+    const sw = [];
+    t.forEach(function(tx) {
+      (tx.inputs || []).forEach(function(i) {
+        if (i.box && i.box.address === a && !i.proofBytes) {
+          sw.push({
+            tx: tx.transactionId,
+            h: tx.inclusionHeight,
+            ts: tx.timestamp,
+            idle: tx.inclusionHeight - i.box.creationHeight,
+            erg: parseInt(i.box.value) / 1e9,
+            assets: i.box.assets
+          });
         }
-      }
-      renderDue(boxes, height, 'Flux', false);
+      });
+    });
+    if (!sw.length) {
+      out.innerHTML = '<div class="verdict v-safe">✓ NOT SWEPT — no rent collection in ' + t.length + ' transactions.</div>';
       return;
     }
-    const tid = TOKEN_IDS[token];
-    if (!tid) throw new Error('unknown token');
-    const lo = height - STORAGE + 1;
-    const hi = height + Math.round(days * 708) - STORAGE;
-    const boxes = []; let capped = false;
-    for (let skip = 0; skip < 2000; skip += 50) {
-      const d = await gql(`query($t:String!,$s:Int!,$lo:Int!,$hi:Int!){ boxes(take:50, skip:$s, tokenId:$t, spent:false, minHeight:$lo, maxHeight:$hi){
-        boxId address value creationHeight assets{ tokenId amount } } }`, {t: tid, s: skip, lo, hi});
-      for (const b of d.boxes) {
-        const amt = (b.assets || []).filter(a => a.tokenId === tid).reduce((t, a) => t + parseInt(a.amount), 0);
-        boxes.push({ boxId: b.boxId, address: b.address, erg: parseInt(b.value) / 1e9, amt,
-                     elig: b.creationHeight + STORAGE, dust: parseInt(b.value) < 150000000 });
-      }
-      if (d.boxes.length < 50) break;
-      if (skip + 50 >= 2000) capped = true;
-    }
-    renderDue(boxes, height, token, capped);
-  } catch (e) {
-    out.innerHTML = `<div class="zero">${String(e.message || e)}</div>`;
+    sw.sort(function(x, y) { return x.h - y.h; });
+    var rows = '<table><tr><th>when</th><th>idle</th><th>erg</th><th>contents</th><th>tx</th></tr>';
+    sw.forEach(function(s) {
+      var dt = new Date(parseInt(s.ts)).toISOString().slice(0, 16).replace('T', ' ');
+      var idleY = (s.idle * SPB / 86400 / 365).toFixed(1);
+      rows += '<tr><td>' + dt + '</td><td>' + idleY + 'y</td><td>' + s.erg.toFixed(4) + '</td><td>' + tl(s.assets) + '</td><td><a href="https://ergexplorer.com/transactions/' + s.tx + '" target="_blank">' + s.tx.slice(0, 10) + '…</a></td></tr>';
+    });
+    rows += '</table>';
+    var et = sw.reduce(function(acc, s) { return acc + s.erg; }, 0);
+    out.innerHTML = '<div class="verdict v-crit">⚠ SWEPT — ' + sw.length + ' box(es), ' + et.toFixed(4) + ' ERG + tokens.</div>' + rows;
+  } catch(e) {
+    out.innerHTML = '<div class="spinner">' + (e.message || e) + '</div>';
   }
 }
+document.getElementById('addr-swept').addEventListener('keydown',e=>{if(e.key==='Enter')checkSwept()});
+
+async function scanDue(){const out=document.getElementById('due-result'),token=document.getElementById('due-token').value,days=parseInt(document.getElementById('due-days').value);
+out.innerHTML='<div class="spinner">scanning…</div>';
+try{const h=await curH().catch(()=>1879500);
+if(token==='Flux'){if(!SNAP){out.innerHTML='<div class="spinner">loading…</div>';return}
+const boxes=[];Object.entries(SNAP.addresses).forEach(([addr,rec])=>{rec.boxes.forEach(b=>{boxes.push({boxId:b.boxId,addr,erg:b.erg,amt:b.flux,elig:b.rentEligibleHeight,dust:b.erg<0.15})})});
+renderDue(boxes,h,'Flux',days);return}
+const tid=Object.entries(TN).find(([id,n])=>n===token)?.[0];
+if(!tid){out.innerHTML='<div class="spinner">Unknown.</div>';return}
+try{const d=await gql(`query($t:String!){boxes(take:50,skip:0,tokenId:$t,spent:false){boxId address value creationHeight assets{tokenId amount}}}`,{t:tid});
+const boxes=(d.boxes||[]).map(b=>({boxId:b.boxId,addr:b.address,erg:parseInt(b.value)/1e9,amt:0,elig:b.creationHeight+STORAGE,dust:parseInt(b.value)<150000000}));
+const inWin=boxes.filter(b=>b.elig>h&&b.elig<=h+days*708&&b.dust);
+if(inWin.length>0)renderDue(boxes,h,token,days);
+else out.innerHTML=`<div class="verdict v-warn">No underfunded ${token} boxes found in first page. Explorer may be under load — try <b>BOX SAFETY</b> for specific addresses.</div>`;
+}catch(e){out.innerHTML=`<div class="verdict v-warn">Live ${token} scan unavailable — explorer under load. Use <b>BOX SAFETY</b> above.</div>`}
+}catch(e){out.innerHTML=`<div class="spinner">${e.message}</div>`}}
+
+function renderDue(boxes,h,label,days){const out=document.getElementById('due-result'),hi=h+days*708;
+const due=boxes.filter(b=>b.elig>h&&b.elig<=hi&&b.dust),nowC=boxes.filter(b=>b.elig<=h&&b.dust);
+due.sort((a,b)=>a.elig-b.elig);
+if(!due.length){out.innerHTML=`<div class="verdict v-safe">✓ No underfunded ${label} boxes claimable in ${days} days.`+(nowC.length?` (${nowC.length} already eligible)`:'')+`</div>`;return}
+let rows='<table><tr><th>from</th><th>erg</th><th>amount</th><th>address</th><th>box</th></tr>';
+due.slice(0,300).forEach(b=>{rows+=`<tr><td>${h2d(b.elig)}</td><td>${b.erg.toFixed(3)}</td><td>${fmt(b.amt)}</td><td>${b.addr.slice(0,12)}…</td><td><a href="https://ergexplorer.com/boxes/${b.boxId}" target="_blank">${b.boxId.slice(0,8)}…</a></td></tr>`});
+const et=due.reduce((t,b)=>t+b.erg,0),at=due.reduce((t,b)=>t+b.amt,0);
+out.innerHTML=`<div class="verdict v-warn">⚠ ${due.length.toLocaleString()} ${label} boxes (≈${fmt(at)} ${label}, ${new Set(due.map(b=>b.addr)).size} addresses) claimable in ${days} days.</div>`+rows+'</table>'}
+
+fetch('known-bots.json').then(r=>r.json()).then(d=>{const el=document.getElementById('bots-content');if(!el)return;
+let h='<table><tr><th>address</th><th>label</th><th>30d boxes</th><th>30d victims</th></tr>';
+d.bots.forEach(b=>{h+=`<tr><td><a href="https://ergexplorer.com/addresses/${b.address}" target="_blank">${b.address.slice(0,16)}…</a></td><td>${b.label}</td><td>${(b.boxes_taken_30d||0).toLocaleString()}</td><td>${(b.unique_victims_30d||0).toLocaleString()}</td></tr>`});
+el.innerHTML=h+'</table>'}).catch(()=>document.getElementById('bots-content').innerHTML='failed to load');
 </script>
 </body>
 </html>
