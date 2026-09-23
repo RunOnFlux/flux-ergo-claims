@@ -11,9 +11,9 @@ Last night, 94.3% of all FLUX on Ergo left our bridge reserve — in 24 minutes.
 
 No key was stolen. No signature forged. The transactions contain no signature at all.
 
-Nobody lost user funds: every balance is honored 1:1.
+All funds are safe on Flux and PA chains thanks to Fusion. Every Ergo balance honored 1:1.
 
-What we found auditing WHY this is possible is bigger than Flux. Thread.
+What we found auditing WHY: bigger than Flux. Thread.
 
 **TWEET 2 (timeline)**
 
@@ -101,8 +101,10 @@ Destruction is a bug; harvesting is an industry.
 
 Our response:
 
-— Flux ends on Ergo. Bridge terminated. Snapshot at block 1,878,291 honors every balance 1:1 in Fusion — 483,623.36 FLUX across 2,842 addresses claimable.
-— The white-hats returned the FULL reserve within 24 hours (verified on-chain; the bulk in ~8). We granted a 100k FLUX critical bug bounty.
+— Flux ends on Ergo. Bridge terminated. Snapshot at block 1,878,291: every balance honored 1:1 in Fusion. 483,623.36 FLUX across 2,842 addresses claimable.
+— Unclaimed Fusion snapshot balances & mining rewards remain claimable on Flux main chain. Nothing lost.
+— White-hats returned the FULL reserve within 24h. 100k FLUX critical bug bounty granted.
+— This aligns with our roadmap: consolidating parallel assets, becoming infrastructure for agents.
 
 Protocol-legal. Universally called a critical defect. That is the design.
 — Zelcore keeps Ergo support: next release attaches min 1 ERG to every token send + severe warnings on all Ergo assets.
