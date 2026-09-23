@@ -127,14 +127,21 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
 </div>
 
 <div id="tab-due" style="display:none">
-  <div class="desc">Boxes becoming rent-eligible in the selected window.</div>
+  <div class="desc">Underfunded boxes becoming rent-eligible (claimable by anyone) in the selected window. Currently available for <b>FLUX</b> (pre-computed from our full-chain audit — always instant).</div>
   <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem">
-    <select id="due-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select>
-    <select id="due-token"><option value="Flux">Flux</option><option value="NETA">NETA</option><option value="ergopad">ergopad</option><option value="COMET">COMET</option><option value="SigUSD">SigUSD</option></select>
-    <button class="go" style="margin-top:0;flex:1;min-width:100px" onclick="scanDue()">Scan</button>
+    <select id="due-days"><option value="7">next 7 days</option><option value="30" selected>next 30 days</option><option value="90">next 90 days</option></select>
+    <button class="go" style="margin-top:0;flex:1;min-width:140px" onclick="scanDue()">Scan FLUX boxes</button>
   </div>
   <div id="due-result"></div>
-  <div class="tiny">Flux scans instantly from snapshot. Live token scans query Ergo explorer — if unavailable, use <b>BOX SAFETY</b> for specific addresses.</div>
+  <div class="verdict v-warn" style="margin-top:1.2rem">
+    <b>Other tokens (NETA, ergopad, COMET, SigUSD, etc.)</b><br>
+    Live scanning is temporarily unavailable — the Ergo explorer APIs are currently overloaded
+    (33,000+ pending transactions from automated sweep bots, and the explorer database
+    lacks a token-ID index for efficient queries).<br><br>
+    <b>Use the <a href="#" onclick="document.querySelector('[data-t=safety]').click();return false">BOX SAFETY</a> tab above instead</b> —
+    it checks any address instantly via address-indexed queries (which work reliably) and shows
+    per-box countdowns for all tokens, not just Flux.
+  </div>
 </div>
 
 <div id="tab-bots" style="display:none">
@@ -409,76 +416,18 @@ function approxHeight() {
   return Math.round(ANCHOR_H + (Date.now() - ANCHOR_MS) / (SPB * 1000));
 }
 
-async function scanDue() {
+function scanDue() {
   const out = document.getElementById('due-result');
-  const token = document.getElementById('due-token').value;
   const days = parseInt(document.getElementById('due-days').value);
-
-  // Flux: compute locally from snapshot — instant, zero network calls
-  if (token === 'Flux') {
-    if (!SNAP) { out.innerHTML = '<div class="spinner">snapshot loading…</div>'; return; }
-    const h = approxHeight();
-    const boxes = [];
-    Object.entries(SNAP.addresses).forEach(([addr, rec]) => {
-      rec.boxes.forEach(b => {
-        boxes.push({boxId: b.boxId, addr, erg: b.erg, amt: b.flux, elig: b.rentEligibleHeight, dust: b.erg < 0.15});
-      });
+  if (!SNAP) { out.innerHTML = '<div class="spinner">snapshot loading…</div>'; return; }
+  const h = approxHeight();
+  const boxes = [];
+  Object.entries(SNAP.addresses).forEach(([addr, rec]) => {
+    rec.boxes.forEach(b => {
+      boxes.push({boxId: b.boxId, addr, erg: b.erg, amt: b.flux, elig: b.rentEligibleHeight, dust: b.erg < 0.15});
     });
-    renderDue(boxes, h, 'Flux', days);
-    return;
-  }
-
-  // Other tokens: use REST API (api.ergoplatform.com) — CORS-enabled, reliable
-  out.innerHTML = '<div class="spinner">scanning ' + token + ' on-chain…</div>';
-  var tid2 = null;
-  for (var idKey in TN) { if (TN[idKey] === token) { tid2 = idKey; break; } }
-  if (!tid2) { out.innerHTML = 'Unknown token.'; return; }
-
-  var h2 = approxHeight();
-  try {
-    // REST API: fetch unspent boxes for this token (sorted by creation height)
-    // CORS-enabled, works from browser
-    var allBoxes = [];
-    for (var offset = 0; offset < 500; offset += 100) {
-      var resp = await fetch('https://api.ergoplatform.com/api/v1/boxes/byTokenId/' + tid2 + '?limit=100&offset=' + offset);
-      var data = await resp.json();
-      if (!data.items || !data.items.length) break;
-      for (var j = 0; j < data.items.length; j++) {
-        var box = data.items[j];
-        if (box.spentTransactionId) continue;
-        var bErg = parseInt(box.value) / 1e9;
-        if (bErg >= 0.15) continue;
-        // Check if this token is in the box's assets
-        var hasToken = false; var tokenAmt = 0;
-        if (box.assets) {
-          for (var k = 0; k < box.assets.length; k++) {
-            if (box.assets[k].tokenId === tid2) {
-              hasToken = true;
-              tokenAmt = parseInt(box.assets[k].amount);
-              break;
-            }
-          }
-        }
-        if (!hasToken) continue;
-        allBoxes.push({
-          boxId: box.boxId,
-          addr: box.address || 'unknown',
-          erg: bErg,
-          amt: tokenAmt,
-          elig: box.creationHeight + STORAGE,
-          dust: true
-        });
-      }
-      if (data.items.length < 100) break;
-    }
-    if (allBoxes.length === 0) {
-      out.innerHTML = '<div class="verdict v-safe">No underfunded ' + token + ' boxes found in the first 500 boxes on-chain.</div>';
-    } else {
-      renderDue(allBoxes, h2, token, days);
-    }
-  } catch(e) {
-    out.innerHTML = '<div class="verdict v-warn"><b>' + token + ' scan error:</b> ' + (e.message || e) + '<br>Try again or use BOX SAFETY above.</div>';
-  }
+  });
+  renderDue(boxes, h, 'Flux', days);
 }
 
 function renderDue(boxes,h,label,days){const out=document.getElementById('due-result'),hi=h+days*708;
