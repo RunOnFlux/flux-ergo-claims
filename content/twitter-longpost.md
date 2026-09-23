@@ -78,7 +78,7 @@ If your Ergo wallet holds a box older than ~3 years with under 0.15 ERG — assu
 
 FOR FLUX HOLDERS: YOU ARE COVERED
 
-No user funds were lost. A snapshot at block 1,878,291 — two blocks before the drain — honors every circulating FLUX balance 1:1 in native FLUX, claimable inside Fusion. Claims do not depend on the recovery.
+All funds are safe on Flux and parallel-asset chains thanks to Fusion. No user funds were lost. A snapshot at block 1,878,291 — two blocks before the drain — honors every circulating FLUX balance 1:1 in native FLUX, claimable inside Fusion. Unclaimed Fusion snapshot balances and mining rewards remain claimable on the Flux main chain — nothing is lost. Claims do not depend on the recovery.
 
 Per the published snapshot: 483,623.36 FLUX across 2,842 addresses is claimable. Check yours: https://ergo.runonflux.com
 
@@ -86,7 +86,7 @@ Per the published snapshot: 483,623.36 FLUX across 2,842 addresses is claimable.
 
 WHAT WE'RE DOING
 
-Flux ends on Ergo. The bridge is terminated permanently.
+Flux ends on Ergo. The bridge is terminated permanently. This aligns with our published roadmap (runonflux.com) of consolidating parallel assets and becoming the infrastructure layer on which agents deploy — this decision simply expedites that timeline.
 
 Zelcore keeps Ergo support — your keys, your chains — but the next release attaches a minimum of 1 ERG to every Ergo token transfer and adds severe plain-language warnings on all Ergo assets.
 
