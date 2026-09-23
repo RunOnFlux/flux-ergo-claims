@@ -137,22 +137,28 @@ design.
 
 ## What we are doing
 
-- **Flux ends on Ergo.** The bridge is terminated. Our roadmap already scheduled reworking parallel
-  assets and consolidating asset chains — this expedites it: from October, dormant boxes become claimable
-  by strangers (7.6M FLUX within 30 days), and we will not hold users' funds on a chain with a built-in
-  timer on them. A snapshot at block 1,878,291 (22:54:55 UTC, September
+- **Flux ends on Ergo.** The bridge is terminated. This aligns with our published roadmap
+  (runonflux.com) of consolidating parallel assets and becoming the infrastructure layer on which
+  agents deploy — this decision simply expedites that timeline. From October onward, dormant boxes
+  become claimable by strangers (7.6M FLUX within 30 days), and we will not hold users' funds on a
+  chain with a built-in timer on them, period. A snapshot at block 1,878,291 (22:54:55 UTC, September
   21, 2026 — two blocks before the drain) honors every circulating FLUX balance 1:1, claimable inside
   Fusion. Roughly 483,623.36 FLUX across 2,842 addresses is user-claimable per the published snapshot
   (balance checker: https://ergo.runonflux.com); claims do not depend on the recovery of the bridge
-  reserve. The operators returned it in full within 24 hours — the bulk of it back at the bridge roughly eight hours after the drain — and we granted a 100,000 FLUX
-  critical bug bounty for the responsible disclosure and return. A taking that is protocol-legal, yet is
-  recognized by every side — the collectors included — as a critical defect, is the design problem
+  reserve. Unclaimed Fusion snapshot balances and mining rewards will remain claimable on the Flux
+  main chain — no action needed, nothing is lost. The operators returned it in full within 24 hours
+  — the bulk of it back at the bridge roughly eight hours after the drain — and we granted a 100,000 FLUX
+  critical bug bounty for the responsible disclosure and return. A protocol-legal action, recognized
+  by every side — the collectors included — as a critical defect, is the design problem
   stated plainly.
 - **Zelcore stays on Ergo — loudly changed.** From our next release: a minimum of 1 ERG attached to every
   Ergo token transfer (decades of rent coverage), and severe plain-language warnings wherever Ergo assets
   appear.
 - **We are publishing everything.** Box-level CSVs of the vulnerable Flux boxes, the full sweep log, and
-  the statistics pack: https://github.com/RunOnFlux/flux-ergo-claims.
+  the statistics pack: https://github.com/RunOnFlux/flux-ergo-claims. We have also built and published
+  the tools the chain lacks at [ergo.runonflux.com](https://ergo.runonflux.com): a live box-safety
+  checker, a sweep detector, a coming-due radar, a known-harvesters registry, and a community shield
+  bot — all open source, built for every Ergo user.
 
 ## What you should do
 
@@ -161,10 +167,11 @@ If you hold anything on Ergo, in any wallet: consolidate aging boxes into funded
 people's Ergo assets, audit your boxes against `creationHeight + 1,051,200` today, not at the next
 incident.
 
-And to Ergo's leadership, miners, and community: this can be unchosen. Rent-exempt-style minimums — or
-any rule that makes third-party confiscation impossible — could ship as an emergency change. Every day
-of delay is another ~1,850 boxes. Until it ships, we do not consider Ergo safe for token custody at
-global scale. Not for our users. Not for anyone's.
+And to Ergo's leadership, miners, and community: this can be unchosen. To that end, we have submitted
+[EIP-0049: Prepaid Storage Rent with Archival and Revival](https://github.com/ergoplatform/eips/pull/107) —
+a complete protocol proposal that eliminates the confiscation branch while preserving rent income and
+state cleanup. Every day of delay is another ~1,850 boxes. Until it ships, we do not consider Ergo safe
+for token custody at global scale. Not for our users. Not for anyone's.
 
 ---
 
