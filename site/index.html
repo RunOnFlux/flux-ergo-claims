@@ -144,55 +144,166 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
 </div>
 
 <div id="tab-story" style="display:none">
-  <div class="banner" style="border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)"><b style="color:var(--crit)">⚠ ERGO CHAIN WARNING</b> — All funds are safe on Flux and PA chains thanks to Fusion. On Ergo, anyone can claim a box unmoved for 4 years without your private key. This is not an exploit — it is Ergo's "storage rent," running at industrial scale.</div>
-  <div class="story-section">
-    <h2>What happened</h2>
-    <p>At 22:57 UTC on September 21, 2026, the Flux bridge reserve on Ergo held <b>415,000,000 FLUX</b> — 94.3% of all Flux on the chain. Three minutes and twenty-seven seconds later, it held nothing.</p>
-    <p>No private key was stolen. No signature was forged. No bug was exploited. Ergo's protocol simply permits strangers to take dormant funds — and ten blocks after our reserve became eligible, automated collectors did.</p>
-    <div class="stats-grid">
-      <div class="stat"><div class="num">415M</div><div class="lbl">FLUX taken</div></div>
-      <div class="stat"><div class="num">3m 27s</div><div class="lbl">Time to drain</div></div>
-      <div class="stat"><div class="num">0</div><div class="lbl">Signatures</div></div>
-      <div class="stat"><div class="num">94.3%</div><div class="lbl">Of supply</div></div>
+
+    <div class="banner" style="border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)">
+      <b style="color:var(--crit)">⚠ ERGO CHAIN WARNING — if you hold any asset on Ergo, read this first.</b><br><br>
+      All funds are safe on Flux and parallel-asset chains thanks to Fusion. On Ergo, however, anyone can claim a box
+      that sits unmoved for four years, without your private key. If it holds less than ~0.15 ERG, the claimant keeps
+      everything in it — ERG, tokens, NFTs, all of it. This is not an exploit or a hack: it is Ergo's "storage rent,"
+      designed, documented, and defended by the chain's leadership — and it is running right now at industrial scale.
+      If you hold assets on Ergo: consolidate aging boxes and keep at least 1 ERG on every token box, or move funds
+      off the chain. Check your boxes with the BOX SAFETY tab above — free, live, no wallet connection needed.
     </div>
-    <h2>The evidence — 30 days</h2>
-    <div class="stats-grid">
-      <div class="stat"><div class="num">42,433</div><div class="lbl">Boxes claimed</div></div>
-      <div class="stat"><div class="num">5,402</div><div class="lbl">Victim addresses</div></div>
-      <div class="stat"><div class="num">6 min</div><div class="lbl">Median survival</div></div>
-      <div class="stat"><div class="num">100%</div><div class="lbl">Claimed <24h</div></div>
-    </div>
-    <p>Two operators claimed 42,433 boxes from 5,402 addresses — including stablecoins, wrapped assets, staking keys, and NFTs.</p>
-    <p class="highlight">Destruction is a bug; harvesting is an industry.</p>
-    <h2>For Flux holders — you are covered</h2>
-    <ul>
-      <li><b>All funds safe</b> on Flux and PA chains thanks to Fusion</li>
-      <li><b>Every Ergo balance honored 1:1</b> — snapshot at block 1,878,291</li>
-      <li><b>483,623.36 FLUX / 2,842 addresses claimable</b> — check in the FLUX CLAIM tab</li>
-      <li><b>Fusion rewards claimable on main chain</b> — nothing lost</li>
-      <li><b>Claims open in Fusion</b> early October</li>
-      <li><b>Do not buy FLUX on Ergo</b> — post-snapshot carries no claim</li>
-    </ul>
-    <h2>The return — within 24 hours</h2>
-    <p>The operators returned the bridge reserve <b>in full within 24 hours</b>. We granted a <b>100,000 FLUX critical bug bounty</b> for the responsible disclosure.</p>
-    <h2>This aligns with our roadmap</h2>
-    <p>Flux's <a href="https://runonflux.com">published roadmap</a> already scheduled consolidating parallel assets and becoming infrastructure for agents — this expedites that timeline. We will not hold users' funds on a chain with a built-in timer, period.</p>
-    <h2>Our response</h2>
-    <div class="links-grid">
-      <a class="link-card" href="https://github.com/ergoplatform/eips/pull/107"><div class="lc-title">EIP-0049: Prepaid Storage Rent</div><div class="lc-desc">Protocol fix: eliminates confiscation, preserves rent. Archived + revival model.</div></a>
-      <a class="link-card" href="https://github.com/RunOnFlux/flux-ergo-claims"><div class="lc-title">Evidence & Source</div><div class="lc-desc">30-day audit CSVs, snapshot data, shield bot. Open source.</div></a>
-      <a class="link-card" href="#" onclick="document.querySelector('[data-t=safety]').click();return false"><div class="lc-title">Box Safety Checker</div><div class="lc-desc">Live check any address — countdown, verdict, advice.</div></a>
-      <a class="link-card" href="#" onclick="document.querySelector('[data-t=swept]').click();return false"><div class="lc-title">Sweep Detector</div><div class="lc-desc">Check if an address was ever swept — dates, amounts, tx IDs.</div></a>
-    </div>
-    <h2>Act now</h2>
-    <p>We call on Ergo's leadership, miners, and community: ship rent-exempt minimums. Until then, we do not consider Ergo safe for token custody at global scale.</p>
-    <div class="meta" style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border)">
-      Verify: <a href="https://ergexplorer.com/transactions/bb3607fa4b3a2764534888b07bb196d60d94460897afc053c0e409fc81c5ca06">tx bb3607fa</a> ·
-      <a href="https://github.com/RunOnFlux/flux-ergo-claims">evidence</a> ·
-      <a href="https://ergoplatform.org/en/blog/2022-02-18-ergo-explainer-storage-rent/">Ergo's explainer</a>
+
+    <div class="story-section">
+      <h2>What happened</h2>
+      <p>At 22:57 UTC on September 21, 2026, the Flux bridge reserve on Ergo held <b>415,000,000 FLUX</b> —
+      94.3% of all Flux on the chain. Three minutes and twenty-seven seconds later, it held nothing.</p>
+      <p>No private key was stolen. No signature was forged. No bug was exploited.
+      Ergo's protocol simply permits strangers to take dormant funds — and ten blocks after our reserve
+      became eligible, automated collectors did.</p>
+
+      <div class="stats-grid">
+        <div class="stat"><div class="num">415M</div><div class="lbl">FLUX taken</div></div>
+        <div class="stat"><div class="num">3m 27s</div><div class="lbl">Time to drain</div></div>
+        <div class="stat"><div class="num">0</div><div class="lbl">Signatures required</div></div>
+        <div class="stat"><div class="num">94.3%</div><div class="lbl">Of Flux supply</div></div>
+      </div>
+
+      <p>Verify the transactions yourself:
+      <a href="https://ergexplorer.com/transactions/bb3607fa4b3a2764534888b07bb196d60d94460897afc053c0e409fc81c5ca06" target="_blank">tx bb3607fa</a> ·
+      <a href="https://ergexplorer.com/transactions/bafedb4ae36a8f403b80627af96b42d0b7ad9e1a49ae9f0629a55d45ac75aac2" target="_blank">tx bafedb4a</a> —
+      inspect them. <code>spendingProof: null</code> on our boxes. The only signed input belongs to the collector,
+      funding the transaction from their own wallet.</p>
+
+      <h2>The mechanism — how Ergo's storage rent works</h2>
+      <p>On Ergo, any unspent box that sits unmoved for four years (1,051,200 blocks) can be claimed by
+      <b>anyone, without the owner's key</b>, if it holds too little ERG to cover the ~0.1 ERG storage fee.
+      The claimant keeps the entire box — ERG, tokens, NFTs, everything.</p>
+      <p>Wallet software routinely attaches the protocol minimum (0.001 ERG) to token transfers.
+      Every such box is born with a four-year fuse. Almost nobody knows.</p>
+
+      <h3>The control experiment</h3>
+      <p>The same night, the same collectors swept one of our 1 ERG boxes. It could pay its rent — so the
+      protocol forced <b>0.90125 ERG back to our own script</b> and let them keep ~0.099.</p>
+      <p>Same mechanism. Two outcomes. Decided solely by the ERG balance in the box.</p>
+      <p><b>Tokens + dust = confiscated. That is the design.</b></p>
+
+      <h2>The evidence — one week of receipts</h2>
+      <p>Since our reserve was taken, we audited the entire Ergo chain. In just seven days
+      (September 15–22, 2026), two professional collector operations executed:</p>
+
+      <div class="stats-grid">
+        <div class="stat"><div class="num">12,986</div><div class="lbl">Boxes claimed (7d)</div></div>
+        <div class="stat"><div class="num">3,675</div><div class="lbl">Victim addresses</div></div>
+        <div class="stat"><div class="num">1,245</div><div class="lbl">Sweep txs</div></div>
+        <div class="stat"><div class="num">18 min</div><div class="lbl">Median survival</div></div>
+      </div>
+
+      <p>In 30 days, the same two operators claimed <b>42,433 boxes from 5,402 addresses</b> —
+      6,300 boxes confiscated outright including tokens and 286 ERG. Roughly 3,600 ERG in rent was
+      levied on funded boxes. <b>458 distinct tokens</b> were affected, including:</p>
+      <ul>
+        <li><b>SigUSD</b> — the Ergo stablecoin</li>
+        <li><b>WT_ADA, WT_ERG</b> — wrapped assets</li>
+        <li>Staking keys, NFTs, and community tokens</li>
+      </ul>
+      <p>Of the boxes reaching eligibility, <b>100% were claimed within 24 hours</b>. In our audit of all
+      90,490 boxes that have ever held FLUX, not a single unspent box older than the four-year threshold
+      exists. The largest collector operation alone has executed <b>77,532 transactions</b> in its lifetime.</p>
+      <p class="highlight">Destruction is a bug; harvesting is an industry.</p>
+
+      <h2>What this means for Flux holders</h2>
+      <ul>
+        <li><b>All funds are safe on Flux and parallel-asset chains</b> thanks to Fusion.</li>
+        <li><b>Every Ergo balance is honored 1:1</b> — snapshot at block 1,878,291, two blocks before the drain.
+        483,623.36 FLUX across 2,842 addresses is user-claimable — check yours in the FLUX CLAIM tab above.</li>
+        <li><b>Unclaimed Fusion snapshot balances and mining rewards</b> remain claimable on the Flux main chain —
+        no action needed, nothing is lost.</li>
+        <li><b>Claims open inside Fusion</b> in early October — no external sites are legitimate.
+        Anything claiming to be a Flux–Ergo portal outside Fusion is a scam.</li>
+        <li><b>Do not buy FLUX on Ergo</b> — tokens acquired after Sep 21, 22:54:55 UTC carry no claim.</li>
+      </ul>
+
+      <h2>The return — within 24 hours</h2>
+      <p>The operators of the collection scripts returned the bridge reserve <b>in full within 24 hours</b> —
+      the bulk back at the bridge roughly eight hours after the drain (txs
+      <code>6885dd25</code>, <code>04ea4144</code>, <code>b8b51db2</code> — all verified on-chain).
+      We granted them a <b>100,000 FLUX (main chain) critical bug bounty</b> for the responsible disclosure
+      and return.</p>
+      <p>A protocol-legal action, recognized by everyone involved — collectors included — as a critical defect,
+      is the strongest confirmation of the problem.</p>
+
+      <h2>This aligns with our roadmap</h2>
+      <p>Flux's published roadmap (<a href="https://runonflux.com">runonflux.com</a>) already scheduled
+      consolidating parallel assets and becoming the infrastructure layer on which agents deploy —
+      this decision simply expedites that timeline. From October onward, dormant FLUX boxes become
+      claimable by strangers (7.6M FLUX becomes eligible within 30 days alone). We will not hold users'
+      funds on a chain with a built-in timer, period.</p>
+
+      <h2>Zelcore changes — shipping end of September</h2>
+      <ul>
+        <li>Every Ergo token transfer from Zelcore attaches a <b>minimum of 1 ERG</b> — decades of
+        storage coverage instead of a four-year fuse.</li>
+        <li><b>Severe warnings</b> appear wherever Ergo assets are held, received, or sent, in plain words:
+        <i>"on Ergo, a box idle for four years with too little ERG can be claimed by anyone, without
+        your private key."</i></li>
+      </ul>
+      <p>To every Ergo holder on any wallet: consolidate aging boxes, keep at least 1 ERG on every
+      token box, and treat the four-year mark as the hard deadline it is.</p>
+
+      <h2>Our response — the fix and the tools</h2>
+      <p>We didn't just document the problem. We submitted a complete protocol fix and built the
+      tools the chain lacks:</p>
+      <div class="links-grid">
+        <a class="link-card" href="https://github.com/ergoplatform/eips/pull/107">
+          <div class="lc-title">EIP-0049: Prepaid Storage Rent</div>
+          <div class="lc-desc">Complete protocol proposal to Ergo — eliminates the confiscation branch
+          while preserving rent income and state cleanup. Boxes deplete rent continuously; exhausted boxes
+          enter an archived state the owner can revive. No cliff. No confiscation.</div>
+        </a>
+        <a class="link-card" href="https://github.com/RunOnFlux/flux-ergo-claims">
+          <div class="lc-title">Evidence & Source Code</div>
+          <div class="lc-desc">Full 30-day audit evidence (CSVs), snapshot data, shield bot, and all tools.
+          Open source, verifiable, forkable.</div>
+        </a>
+        <a class="link-card" href="#" onclick="document.querySelector('[data-t=safety]').click();return false">
+          <div class="lc-title">Box Safety Checker</div>
+          <div class="lc-desc">Live check of any Ergo address — per-box countdown, verdict, and advice.
+          Free, no wallet connection needed.</div>
+        </a>
+        <a class="link-card" href="#" onclick="document.querySelector('[data-t=swept]').click();return false">
+          <div class="lc-title">Sweep Detector</div>
+          <div class="lc-desc">Check if any Ergo address was ever swept — dates, amounts, transaction IDs.
+          Powered by on-chain proof-byte analysis.</div>
+        </a>
+      </div>
+
+      <h2>Act now</h2>
+      <p>We call on Ergo's leadership, core developers, miners, and community:</p>
+      <ul>
+        <li><b>Ship rent-exempt-style minimum balances</b> — or any rule making third-party confiscation
+        impossible — as an emergency protocol change.</li>
+        <li><b>Publish dormant boxes approaching eligibility</b> and notify holders. Roughly 1,850 boxes
+        belonging to some 500 addresses are being harvested per day.</li>
+        <li><b>Acknowledge the scale</b> — nearly 13,000 boxes taken from 3,675 addresses per week is not
+        "garbage collection." It is automated, industrial confiscation of other people's assets.</li>
+      </ul>
+      <p>Our criticism is of a design, not of people. We thank the Ergo team for notifying us and working
+      with us closely throughout.</p>
+      <p>Until it ships, we do not consider Ergo safe for token custody at global scale — for our users,
+      or for anyone's.</p>
+
+      <div class="meta" style="margin-top:2.5rem;padding-top:1.2rem;border-top:1px solid var(--border)">
+        <b>Verify everything:</b><br>
+        <a href="https://ergexplorer.com/transactions/bb3607fa4b3a2764534888b07bb196d60d94460897afc053c0e409fc81c5ca06" target="_blank">Drain tx bb3607fa</a> ·
+        <a href="https://ergexplorer.com/transactions/bafedb4ae36a8f403b80627af96b42d0b7ad9e1a49ae9f0629a55d45ac75aac2" target="_blank">Drain tx bafedb4a</a> ·
+        <a href="https://github.com/RunOnFlux/flux-ergo-claims" target="_blank">Evidence pack (CSVs, stats)</a> ·
+        <a href="https://github.com/ergoplatform/eips/pull/107" target="_blank">EIP-0049 (protocol fix)</a> ·
+        <a href="https://ergoplatform.org/en/blog/2022-02-18-ergo-explainer-storage-rent/" target="_blank">Ergo's own storage rent explainer</a>
+      </div>
     </div>
   </div>
-</div>
 </div>
 
 <div class="footer">
