@@ -75,6 +75,40 @@ observed claim rate (1,400–1,850 boxes/day, with 100% of eligible boxes claime
 **~130,000–170,000 boxes will be claimed chain-wide in the next 90 days.** Any box older than ~3 years
 holding <0.15 ERG should be considered scheduled.
 
+## Active addresses are swept too (sample, 2026-09-25)
+
+File: `evidence/ergo-swept-address-activity-sample.csv`. 60 addresses drawn at random (seed 1) from
+the sweep log's whole-box confiscations of token-carrying P2PK boxes (<0.15 ERG). For each, the
+address's transaction history was checked for any other transaction before the sweep.
+
+| Last other transaction before the box was swept | Addresses |
+|---|---:|
+| Within 2 weeks | 1 (`9i9sqCAKBWXBWi…`, 9 days before) |
+| Within 3 months | 7 |
+| Within 12 months | 16 (27%) |
+
+Wallets spend only the boxes a transaction needs, so an address in regular use can still hold an
+untouched token box past the 4-year threshold. The Flux bridge address itself was last used in
+January 2025, eight months before its 400M FLUX box was taken.
+
+## Next wave: Rosen (RSN), 2023 vintage (2026-09-25)
+
+File: `evidence/ergo-rsn-boxes.csv`. Complete enumeration of all 10,038 unspent boxes holding RSN
+(token `8b08cdd5…`, minted 2023-10-23, supply 1.0B) at height 1,880,595. Rent per box is estimated
+from serialized size (ErgoTree + tokens + registers + fixed fields) × 1,250,000 nanoERG/byte; a box is
+flagged `underfunded` when its ERG value is below that estimate.
+
+| Becomes claimable | Underfunded boxes | RSN |
+|---|---:|---:|
+| Q4 2027 | 97 (76 addresses) | 38,820,759 |
+| 2028 | 5,736 (177 addresses) | 1,513,681 |
+| 2029–2030 | remainder | ~253M (incl. one 247,194,007 RSN contract box, ~2030-09-23) |
+| **Total** | **9,056 of 10,038** | **293,662,424 (29% of supply)** |
+
+Largest near-term exposures: 30,000,000 RSN holding 0.1 ERG (~2027-12-24) and 8,241,950 RSN holding
+0.025 ERG (~2027-11-03). Any of these boxes can be protected by moving it before its date. Size-based
+rent is an estimate; boxes near the threshold may fall either way.
+
 ## Method & caveats
 
 - FLUX box data: complete enumeration of all 90,490 boxes ever holding the token, filtered to unspent

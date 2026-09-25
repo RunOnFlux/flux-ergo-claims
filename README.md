@@ -39,8 +39,9 @@ Reference check: internal estimate 484,805.78 vs published 483,623.36 → 0.24% 
   known bot/collector address from the 30-day audit — public for community verification.
   The bot is a skeleton: monitoring and logging are functional; transaction signing requires
   `ergo-lib-wasm-nodejs` and key configuration (see the script header for setup instructions).
-- `evidence/` — box-level CSVs: all vulnerable FLUX boxes, the October exposure window, and the
-  30-day storage-rent sweep log (12,986 victim boxes).
+- `evidence/` — box-level CSVs: all vulnerable FLUX boxes, the October exposure window, the
+  30-day storage-rent sweep log (12,986 victim boxes), a sample of swept addresses with their prior
+  activity, and every unspent RSN box with its estimated rent and claimable date.
 
 ## Snapshot provenance & verification
 
