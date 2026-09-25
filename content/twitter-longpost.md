@@ -52,7 +52,7 @@ We didn't just document the issue — we shipped the fix and free tools for ever
 
 A NOTE ON TRANSPARENCY
 
-Ergo has never hidden this mechanism — it's in the whitepaper and their own explainer posts. We're a custody team and we should have accounted for it; that's on us. Our disagreement isn't about transparency. It's about whether "documented" makes a confiscation branch acceptable for token custody.
+This mechanism isn't secret — it's in the whitepaper and the protocol source. But none of Ergo's wallet-developer docs mention it, and the SDKs wallets are built on carry no warnings. We're a custody team and we should have accounted for it; that's on us. Our disagreement isn't about secrecy. It's about whether "documented" makes a confiscation branch acceptable for token custody.
 
 We thank the Ergo team for their cooperation throughout, and the operators who returned the Flux bridge reserve within 24 hours of collection.
 

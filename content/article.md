@@ -49,11 +49,17 @@ legal.**
 Inspect them. `spendingProof: null` on our boxes. The only *signed* input belongs to the collector,
 funding the transaction from their own wallet.
 
-One thing deserves saying plainly: Ergo has never hidden this mechanism. It is in the whitepaper, in the
-chain's own educational material, and in wallet documentation. We are a professional custody team and
-we failed to account for it — that failure is ours, and we own it. The disagreement that remains is not
-about transparency. It is about whether "documented" makes a confiscation branch acceptable for token
-custody — and on that, the numbers in this article are our answer.
+One thing deserves saying plainly: the mechanism is not secret. It is in the whitepaper and the protocol
+source, and Ergo's docs acknowledge — on a page in the *mining* section, added in July 2023, after we had
+integrated — that users "may lose valuable assets unintentionally." But it is not where wallet developers
+look. None of the wallet-developer pages in Ergo's docs mention storage rent. The integration guide
+mentions a rent *fee* in one line, not that tokens can be taken. The SDKs wallets are built on (Fleet,
+AppKit, ergo-lib) carry no warnings, and Fleet's default box value for token outputs is 0.001 ERG — the
+exact amount that puts a box in the confiscation branch. We are a professional custody team and we still
+failed to account for it; that failure is ours, and we own it. But if a wallet team in regular contact with
+the Ergo team never had it flagged, "documented" is not the same as "communicated" — and even then, the
+real question is whether any documentation makes a confiscation branch acceptable for token custody. On
+that, the numbers in this article are our answer.
 
 The same night produced a perfect control experiment. The bridge also held a 1 ERG box from the same
 2022 vintage. Because it could pay its rent, the collector's sweep was forced to return 0.90125 ERG *to
