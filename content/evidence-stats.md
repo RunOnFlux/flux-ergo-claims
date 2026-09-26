@@ -109,6 +109,23 @@ Largest near-term exposures: 30,000,000 RSN holding 0.1 ERG (~2027-12-24) and 8,
 0.025 ERG (~2027-11-03). Any of these boxes can be protected by moving it before its date. Size-based
 rent is an estimate; boxes near the threshold may fall either way.
 
+## What a sweep does to the state (7-day log, 2026-09-26)
+
+File: `evidence/ergo-sweep-state-delta.csv`. Every transaction in `ergo-rent-sweep-log.csv`
+(1,245 sweeps, Sep 15–22, 2026) re-fetched from the explorer and measured before and after. Box
+sizes are estimated from serialized fields (ErgoTree, tokens, registers, fixed overhead).
+
+| | Before (inputs) | After (outputs) | Change |
+|---|---:|---:|---:|
+| Boxes | 13,675 | 14,272 | **+597 (+4.4%)** |
+| Token entries | 3,139 | 1,912 | −1,227 (−39%) |
+| Estimated bytes | 1,591,064 | 1,357,370 | −233,694 (−14.7%) |
+
+Outputs: 10,399 funded boxes recreated for their owners (rent deducted), 610 collector boxes, 1,245
+miner-fee boxes, 2,018 ERG payouts to other addresses. The box count rose in 545 sweeps, fell in 155
+and was unchanged in 545. The only material saving is token entries merged into collector boxes:
+about 234 KB over the week, roughly 12 MB a year at this rate.
+
 ## Method & caveats
 
 - FLUX box data: complete enumeration of all 90,490 boxes ever holding the token, filtered to unspent
