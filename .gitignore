@@ -1,0 +1,5 @@
+node_modules/
+.omo/
+# runtime outputs from the rent monitors (regenerated on each run)
+bot/*-snapshot.json
+bot/shield-log.jsonl
