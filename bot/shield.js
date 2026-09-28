@@ -93,20 +93,26 @@ async function getBotUtxos() {
 }
 
 async function findEligibleBoxes(height) {
+  // Storage-rent eligibility keys off the box's SETTLEMENT height (the block it
+  // was included in) — what the protocol's age rule uses — NOT the declared
+  // creationHeight. So we filter the window with heightType:settlement and
+  // compute eligibleAt from settlementHeight. creationHeight is still fetched
+  // because box reconstruction in buildSweepTx must preserve the declared value.
   const lo = height - STORAGE_PERIOD;
   const hi = height + PRE_BUILD_BLOCKS - STORAGE_PERIOD;
   const out = [];
   for (const tid of TOKENS_TO_WATCH) {
     try {
       const d = await gql(`query($t:String!,$lo:Int!,$hi:Int!) {
-        boxes(take:50, skip:0, tokenId:$t, spent:false, minHeight:$lo, maxHeight:$hi) {
-          boxId address value creationHeight ergoTree assets{ tokenId amount } } }`,
+        boxes(take:50, skip:0, tokenId:$t, spent:false, minHeight:$lo, maxHeight:$hi, heightType:settlement) {
+          boxId address value creationHeight settlementHeight ergoTree assets{ tokenId amount } } }`,
         { t: tid, lo, hi });
       for (const b of d.boxes || []) {
         if (parseInt(b.value) < DUST_THRESHOLD) {
           out.push({
             boxId: b.boxId, address: b.address, value: parseInt(b.value),
-            creationHeight: b.creationHeight, eligibleAt: b.creationHeight + STORAGE_PERIOD,
+            creationHeight: b.creationHeight, settlementHeight: b.settlementHeight,
+            eligibleAt: b.settlementHeight + STORAGE_PERIOD,
             ergoTree: b.ergoTree,
             assets: (b.assets || []).map(a => ({ tokenId: a.tokenId, amount: parseInt(a.amount) })),
           });

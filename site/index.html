@@ -100,6 +100,7 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
   <button class="tab" data-t="safety">🛡 BOX SAFETY</button>
   <button class="tab" data-t="swept">🔍 BEEN SWEPT?</button>
   <button class="tab" data-t="due">⏰ COMING DUE</button>
+  <button class="tab" data-t="watch">🛰 RENT WATCH</button>
   <button class="tab" data-t="bots">🤖 KNOWN BOTS</button>
   <button class="tab" data-t="story">📖 FULL STORY</button>
 </div>
@@ -146,6 +147,17 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
     it checks any address instantly via address-indexed queries (which work reliably) and shows
     per-box countdowns for all tokens, not just Flux.
   </div>
+</div>
+
+<div id="tab-watch" style="display:none">
+  <div class="desc">Live network-wide feed of boxes approaching rent-eligibility, straight from a <b>Flux-operated Ergo node</b> — every token and plain-ERG box, not just Flux. Unlike COMING DUE (pre-computed FLUX audit), this updates continuously.</div>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
+    <select id="watch-filter"><option value="all" selected>all tracked boxes</option><option value="collectable">collectable now</option><option value="tokens">holding tokens</option></select>
+    <button class="go" style="margin-top:0;flex:1;min-width:140px" onclick="loadWatch()">Refresh</button>
+  </div>
+  <div id="watch-stats"></div>
+  <div id="watch-result"><div class="spinner">Loading live feed…</div></div>
+  <div class="tiny">Served by <code>rent-api</code> on a Flux Ergo node. Read-only public data. Auto-refreshes while this tab is open.</div>
 </div>
 
 <div id="tab-bots" style="display:none">
@@ -336,7 +348,7 @@ function h2d(h){return new Date((A0T+(h-A0H)*SPB)*1000).toISOString().slice(0,10
 function fmt(x){return Number(x).toLocaleString(undefined,{maximumFractionDigits:2})}
 function valid(a){return/^9[A-Za-z0-9]{50,}$/.test(a)}
 function tl(a){if(!a||!a.length)return'(ERG)';return a.map(x=>TN[x.tokenId]||x.tokenId.slice(0,8)+'…').join(', ')}
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');['claims','safety','swept','due','bots','story'].forEach(n=>document.getElementById('tab-'+n).style.display=(n===t.dataset.t)?'':'none')}));
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');['claims','safety','swept','due','watch','bots','story'].forEach(n=>document.getElementById('tab-'+n).style.display=(n===t.dataset.t)?'':'none');if(t.dataset.t==='watch')onWatchOpen()}));
 
 let SNAP=null;
 fetch('snapshot.json').then(r=>r.json()).then(d=>{SNAP=d;const t=d.totals;
@@ -443,6 +455,43 @@ let rows='<table><tr><th>from</th><th>erg</th><th>amount</th><th>address</th><th
 due.slice(0,300).forEach(b=>{rows+=`<tr><td>${h2d(b.elig)}</td><td>${b.erg.toFixed(3)}</td><td>${fmt(b.amt)}</td><td>${b.addr.slice(0,12)}…</td><td><a href="https://ergexplorer.com/boxes/${b.boxId}" target="_blank">${b.boxId.slice(0,8)}…</a></td></tr>`});
 const et=due.reduce((t,b)=>t+b.erg,0),at=due.reduce((t,b)=>t+b.amt,0);
 out.innerHTML=`<div class="verdict v-warn">⚠ ${due.length.toLocaleString()} ${label} boxes (≈${fmt(at)} ${label}, ${new Set(due.map(b=>b.addr)).size} addresses) claimable in ${days} days.</div>`+rows+'</table>'}
+
+// ---- RENT WATCH: live feed from the Flux-operated Ergo node (rent-api) ----
+const RENT_API='https://api.ergo.runonflux.com';
+let watchLoaded=false,watchTimer=null;
+function onWatchOpen(){if(!watchLoaded)loadWatch();if(!watchTimer)watchTimer=setInterval(()=>{if(document.getElementById('tab-watch').style.display!=='none')loadWatch();},60000);}
+function wErg(nano){return(Number(nano)/1e9)}
+function wTokens(r){if(!r.tokens||!r.tokens.length)return'<span style="color:var(--subtle)">(ERG only)</span>';return r.tokens.map(t=>t.label||TN[t.tokenId]||t.tokenId.slice(0,8)+'…').join(', ')}
+async function loadWatch(){
+  const stats=document.getElementById('watch-stats'),out=document.getElementById('watch-result');
+  const filter=document.getElementById('watch-filter').value;
+  let qs='?limit=300';if(filter==='collectable')qs+='&status=collectable';if(filter==='tokens')qs+='&withTokens=1';
+  try{
+    const r=await fetch(RENT_API+'/rent/boxes'+qs,{cache:'no-store'});
+    if(!r.ok)throw new Error('API HTTP '+r.status);
+    const d=await r.json();const t=d.totals||{};
+    watchLoaded=true;
+    const ago=Math.max(0,Math.round((Date.now()-Date.parse(d.generatedAt))/1000));
+    stats.innerHTML=`<div class="stats-grid">
+      <div class="stat"><div class="num" style="color:var(--crit)">${(t.collectable||0).toLocaleString()}</div><div class="lbl">Collectable now</div></div>
+      <div class="stat"><div class="num">${(t.boxes||0).toLocaleString()}</div><div class="lbl">Boxes tracked</div></div>
+      <div class="stat"><div class="num">${fmt(wErg(t.ergAtRest||0))}</div><div class="lbl">ERG at rest</div></div>
+      <div class="stat"><div class="num">${(t.withTokens||0).toLocaleString()}</div><div class="lbl">Holding tokens</div></div>
+    </div><div class="meta">node height ${(d.height||0).toLocaleString()} · updated ${ago}s ago · window ${Math.round((d.window&&d.window.lookaheadBlocks||0)*SPB/86400)}d ahead</div>`;
+    const rows=d.rows||[];
+    if(!rows.length){out.innerHTML='<div class="verdict v-safe">✓ No boxes in the tracked window right now.</div>';return}
+    const nowC=rows.filter(x=>x.status==='COLLECTABLE').length;
+    let h=`<table><tr><th>eligible</th><th>status</th><th>erg</th><th>contents</th><th>box</th></tr>`;
+    rows.forEach(b=>{const collect=b.status==='COLLECTABLE',days=Math.round(b.eligibleInBlocks*SPB/86400);
+      const cls=collect?'crit':(days<=7?'crit':'warn'),lbl=collect?'CLAIMABLE NOW':(days<=1?'< 1 day':'in '+days+'d');
+      h+=`<tr><td>${h2d(b.eligibleAt)}</td><td class="${cls}">${lbl}</td><td>${wErg(b.valueNano).toFixed(3)}${b.drainable?' <span class="warn" title="low value — rent erodes it">⚠</span>':''}</td><td>${wTokens(b)}</td><td><a href="https://ergexplorer.com/boxes/${b.boxId}" target="_blank">${b.boxId.slice(0,10)}…</a></td></tr>`});
+    h+='</table>';
+    const head=nowC>0?`<div class="verdict v-crit">⚠ ${nowC.toLocaleString()} box(es) claimable by anyone right now.</div>`:`<div class="verdict v-warn">${rows.length.toLocaleString()} boxes approaching eligibility.</div>`;
+    out.innerHTML=head+h;
+  }catch(e){
+    out.innerHTML=`<div class="verdict v-warn">Live feed unavailable — ${e.message}.<br><span class="tiny">The rent-api node service may be deploying or unreachable. Try Refresh shortly, or use BOX SAFETY / COMING DUE (which work without it).</span></div>`;
+  }
+}
 
 fetch('known-bots.json').then(r=>r.json()).then(d=>{const el=document.getElementById('bots-content');if(!el)return;
 let h='<table><tr><th>address</th><th>label</th><th>30d boxes</th><th>30d victims</th></tr>';
