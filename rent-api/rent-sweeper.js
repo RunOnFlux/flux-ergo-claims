@@ -72,7 +72,7 @@ async function submitTx(txJson) {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txJson),
   });
   const body = await r.text();
-  if (!r.ok) throw new Error(`submit ${r.status}: ${body}`);
+  if (!r.ok) { let d = body; try { d = JSON.parse(body).detail || body; } catch {} throw new Error(`submit ${r.status}: ${d}`); }
   return body.replace(/"/g, '');
 }
 // Full consensus validation WITHOUT broadcasting: the node checks signatures, the
@@ -267,7 +267,7 @@ async function processBatch(kind, boxes, height, built) {
       if (lost) { stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1; }
       else stats.txsFailed++;
       saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
-      console.log(`[${height}] ${lost ? 'LOST race' : 'submit error'} (${kind}): ${e.message.split('\n')[0]}`);
+      console.log(`[${height}] ${lost ? 'LOST race' : 'submit error'} (${kind}): ${e.message.replace(/\s+/g, ' ').slice(0, 400)}`);
     }
   }
 }
