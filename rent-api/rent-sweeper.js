@@ -232,18 +232,25 @@ function escalateBid(box, take) {
 }
 // Pick the fee for a box: max of (escalated floor, just-above any rival in the mempool),
 // capped at a share of our take. Returns { fee, cap, rival } for logging/decisions.
-function chooseFee(box, take, conflicts) {
+function chooseFee(box, take, conflicts, kind) {
   const cap = BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
   let fee = getBid(box);                                   // floor from prior losses
   const rival = conflicts.get(box.boxId);
+  let ourSize = 300;
   if (rival) {
-    const beat = BigInt(Math.ceil(rival.fee * 1.12)) + 2000n; // ~12% over their fee to out-weight despite size diff
+    // Ergo replaces on WEIGHT (fee/byte), not fee. Our tx bytes ≈ box bytes (dust) or
+    // ~2× (funded recreates the box). Bid to out-weight them for OUR size, +8% margin.
+    const bb = boxBytesLen(box);
+    ourSize = (kind === 'funded' ? 2 * bb : bb) + 240;
+    const beat = BigInt(Math.ceil(rival.weight * ourSize * 1.08)) + 2000n;
     if (beat > fee) fee = beat;
   }
   if (fee < FEE) fee = FEE;
   const capped = fee > cap;
   if (capped) fee = cap;
-  return { fee, cap, rival, capped };
+  // winnable iff our resulting weight (fee/byte) beats the rival's
+  const winnable = !rival || (Number(fee) / ourSize) > rival.weight;
+  return { fee, cap, rival, capped, winnable };
 }
 
 async function buildSweep(boxes, height, fee = FEE) {
@@ -366,11 +373,11 @@ async function tick() {
     // One solo tx per box, fired in parallel. `take` = what WE collect (dust: whole
     // value; funded: the storage fee), which sets both the profit and the bid cap.
     const attempt = async (kind, box, take, buildFn) => {
-      const { fee, cap, rival, capped } = chooseFee(box, take, conflicts);
+      const { fee, cap, rival, capped, winnable } = chooseFee(box, take, conflicts, kind);
       const net = take - fee;
       const tag = `${kind} ${box.boxId.slice(0, 10)}…`;
-      if (rival && fee <= BigInt(Math.floor(rival.fee))) { // capped out — can't out-bid within our profit cap
-        if (VERBOSE) console.log(`  SKIP ${tag}: rival fee ${(rival.fee / 1e9).toFixed(4)} ≥ our cap ${(Number(cap) / 1e9).toFixed(4)} — they value it more`);
+      if (!winnable) { // even at our cap, our fee/byte can't beat the rival's weight
+        if (VERBOSE) console.log(`  SKIP ${tag}: rival weight ${rival.weight.toFixed(0)} > our best (fee ${(Number(fee) / 1e9).toFixed(4)}, cap ${(Number(cap) / 1e9).toFixed(4)}) — can't out-weight profitably`);
         return;
       }
       if (net < MIN_MARGIN) {
