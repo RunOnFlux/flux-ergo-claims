@@ -39,6 +39,7 @@ const NODE_URL = (process.env.ERGO_NODE_URL || 'http://127.0.0.1:9053').replace(
 const HOST = NODE_URL;
 const RENT_API = (process.env.RENT_API_URL || 'http://127.0.0.1:8480').replace(/\/$/, '');
 const MNEMONIC = process.env.SWEEP_MNEMONIC || '';
+const PRIVKEY = (process.env.SWEEP_PRIVATE_KEY || '').trim().replace(/^0x/, ''); // raw dlog secret, hex
 const SAFE_ADDRESS = process.env.SAFE_ADDRESS || '';       // where swept funds go (default: wallet addr)
 const DRY_RUN = process.env.DRY_RUN !== '0';               // default SAFE: don't broadcast
 const FEE = BigInt(process.env.FEE || 1_000_000);          // 0.001 ERG
@@ -51,7 +52,7 @@ const STATS_FILE = path.join(__dirname, 'sweeper-stats.json');
 const LOG_FILE = path.join(__dirname, 'sweeper-log.jsonl');
 const STORAGE_PERIOD = 1_051_200;
 
-if (!MNEMONIC) { console.error('Set SWEEP_MNEMONIC (funds the tx / receives sweeps).'); process.exit(1); }
+if (!MNEMONIC && !PRIVKEY) { console.error('Set SWEEP_MNEMONIC or SWEEP_PRIVATE_KEY (funds the tx / receives sweeps).'); process.exit(1); }
 
 // ==================== NODE / API ====================
 async function jget(url, { allow404 = false } = {}) {
@@ -81,12 +82,23 @@ async function checkTx(txJson) {
 }
 
 // ==================== WALLET ====================
-const seed = ergoLib.Mnemonic.to_seed(MNEMONIC, '');
-const rootSecret = ergoLib.ExtSecretKey.derive_master(seed);
-const secretKey = rootSecret.derive(ergoLib.DerivationPath.from_string("m/44'/429'/0'/0/0"));
-const secretKeys = new ergoLib.SecretKeys(); secretKeys.add(secretKey.secret_key());
-const wallet = ergoLib.Wallet.from_secrets(secretKeys);
-const myAddress = secretKey.public_key().to_address().to_base58(ergoLib.NetworkPrefix.Mainnet);
+// Accepts EITHER a raw dlog private key (SWEEP_PRIVATE_KEY, hex) or a BIP39
+// mnemonic (SWEEP_MNEMONIC). The key/seed only ever lives in this host's env.
+let wallet, myAddress;
+if (PRIVKEY) {
+  const bytes = Uint8Array.from(Buffer.from(PRIVKEY, 'hex'));   // 32-byte secret => 64 hex chars
+  const sk = ergoLib.SecretKey.dlog_from_bytes(bytes);          // build the secret directly
+  const secretKeys = new ergoLib.SecretKeys(); secretKeys.add(sk);
+  wallet = ergoLib.Wallet.from_secrets(secretKeys);
+  myAddress = sk.get_address().to_base58(ergoLib.NetworkPrefix.Mainnet);
+} else {
+  const seed = ergoLib.Mnemonic.to_seed(MNEMONIC, '');
+  const rootSecret = ergoLib.ExtSecretKey.derive_master(seed);
+  const secretKey = rootSecret.derive(ergoLib.DerivationPath.from_string("m/44'/429'/0'/0/0"));
+  const secretKeys = new ergoLib.SecretKeys(); secretKeys.add(secretKey.secret_key());
+  wallet = ergoLib.Wallet.from_secrets(secretKeys);
+  myAddress = secretKey.public_key().to_address().to_base58(ergoLib.NetworkPrefix.Mainnet);
+}
 const destAddress = SAFE_ADDRESS || myAddress;
 
 // ==================== STATS ====================

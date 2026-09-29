@@ -6,3 +6,7 @@ bot/shield-log.jsonl
 rent-api/*-snapshot.json
 rent-api/sweeper-stats.json
 rent-api/sweeper-log.jsonl
+# secrets / local config — never commit
+.env
+*.env
+!*.env.example

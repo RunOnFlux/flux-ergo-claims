@@ -31,12 +31,14 @@ memory: **spent status comes from the node's UTXO set** (`/utxo/byId/{id}` →
 Row: `{ boxId, valueNano, settlementHeight, eligibleAt, eligibleInBlocks, status, drainable, tokenCount, tokens[] }`.
 
 ## Run
+Config and secrets live in a gitignored `.env` (never on the command line):
 ```bash
-ERGO_NODE_URL=http://127.0.0.1:9053 \
-ALLOW_ORIGIN=https://ergo.runonflux.com \
-PORT=8480 \
-node server.js
+cp .env.example .env      # then edit: node URL, CORS origin, and (for the sweeper) your key
+node --env-file=.env server.js        # rent-api        (Node 20.6+)
+node --env-file=.env rent-sweeper.js  # sweeper
 ```
+`pm2 start ecosystem.config.js` runs both and passes `--env-file=.env` for you.
+You can still override any single value inline (e.g. `PORT=9000 node --env-file=.env server.js`) — an explicit env var wins over the file.
 First boot does one full scan of the window (fast on a local node), then
 re-scans incrementally every `SCAN_INTERVAL_MS` (new settlement blocks + a UTXO
 re-check of cached boxes, dropping spent ones). `/health` returns while warming up.
@@ -109,8 +111,11 @@ consolidated output — self-funding from the swept ERG. It writes public stats
 **not** broadcast. Inspect them, then set `DRY_RUN=0` to go live.
 
 ```bash
-SWEEP_MNEMONIC="your twelve words" DRY_RUN=1 node rent-sweeper.js
+cp .env.example .env      # set SWEEP_PRIVATE_KEY (or SWEEP_MNEMONIC) and keep DRY_RUN=1
+node --env-file=.env rent-sweeper.js
 ```
+Provide **one** of `SWEEP_PRIVATE_KEY` (raw dlog secret, 64 hex chars) or `SWEEP_MNEMONIC`.
+On startup it prints `dest <address>` — confirm that matches your funded address.
 
 ### Config (env)
 | Var | Default | Notes |
