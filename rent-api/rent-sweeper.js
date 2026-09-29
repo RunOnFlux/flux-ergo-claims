@@ -163,7 +163,7 @@ async function candidates(height) {
 // fee is spendable with an EMPTY proof plus context-extension var 127 (STORAGE_
 // EXTENSION_INDEX = i8::MAX) set to the output index (SShort). We point every rent
 // input at output 0 (our consolidated box). SShort(0) serializes to "0300".
-const FEE_TREE = '1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798e0400ea02d192a39a8cc7a70173007301';
+const FEE_TREE = '1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a57304';
 const EXT_OUTPUT0 = '0300'; // serialized SShort constant, value 0 -> output index 0
 
 function p2pkErgoTree(addrB58) {
