@@ -141,6 +141,32 @@ ship *this*. Ergo's documentation describes storage rent as garbage collection. 
 harvesting is an industry** — and the confiscation branch is funded by the protocol's own incentive
 design.
 
+## Who profits — and why a vote won't undo it
+
+The collectors do not keep most of what they take; the mempool shows where it goes. In a live sample
+from our own Ergo node, a single dormant box drew **nine competing collection transactions**, each
+bidding the miner fee upward toward the box's entire value — the leader paying roughly **90% of it to
+the miner**. That is not an anomaly; it is the equilibrium. When strangers race to seize the same box,
+the prize is auctioned to whoever mines the block, and the collector keeps only the sliver the auction
+leaves behind.
+
+Which identifies the real beneficiary. Walking recent blocks, storage-rent collections appear in
+**essentially every block**, and a large share pay fees far above the network norm — economically
+irrational for an outsider, for whom the fee is pure loss. It is only rational if the collector *is*
+the miner: the fee is then paid to oneself and returned in the block reward. The pattern is visible
+on-chain — miners whose own blocks are filled with their own high-fee harvests — and we publish it
+live at [ergo.runonflux.com](https://ergo.runonflux.com), updated every block.
+
+We tested the other side. We built a fully protocol-compliant collector and ran it against the live
+network. It never won a contested box, and structurally never will: an independent actor pays the fee
+as a real cost, while a mining pool pays it *to itself* at zero cost and wins every time. The value of
+a dormant box does not flow to some open market. It flows to whoever mines the block.
+
+That is why this will not be corrected from the inside. The storage-rent fee rate is a **miner-set
+parameter**, and the mechanism is a standing revenue stream for exactly the parties who produce blocks
+and ratify protocol change. A fix must be made *safe to adopt* — which is what EIP-0049 does — but the
+incentive to leave it precisely as it is rests with the people who hold the vote.
+
 ## What we are doing
 
 - **Flux ends on Ergo.** The bridge is terminated. This aligns with our published roadmap
@@ -163,8 +189,10 @@ design.
 - **We are publishing everything.** Box-level CSVs of the vulnerable Flux boxes, the full sweep log, and
   the statistics pack: https://github.com/RunOnFlux/flux-ergo-claims. We have also built and published
   the tools the chain lacks at [ergo.runonflux.com](https://ergo.runonflux.com): a live box-safety
-  checker, a sweep detector, a coming-due radar, a known-harvesters registry, and a community shield
-  bot — all open source, built for every Ergo user.
+  checker, a sweep detector, a coming-due radar, a known-harvesters registry, a community shield
+  bot, a **live fee-war monitor** (value flowing to miners, in real time), and a **pool self-harvest
+  analysis** (which miners collect storage rent in their own blocks) — all open source, built for
+  every Ergo user.
 
 ## What you should do
 
