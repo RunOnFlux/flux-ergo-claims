@@ -161,23 +161,24 @@ async function candidates(height) {
 // Rent inputs carry empty proofs (age rule); a wallet funding box signs the tx and
 // also consolidates. Tokens are kept (default) or burned (KEEP_TOKENS=0).
 async function buildSweep(boxes, height, stateCtx) {
-  // gather wallet funding box (also serves as the consolidation seed)
-  const mine = await jget(`${NODE_URL}/wallet/boxes/unspent?minConfirmations=1&minInclusionHeight=0`).catch(() => null);
-  // fall back to explorer-style if node wallet API not enabled:
+  // A whole-takeable batch SELF-FUNDS: the swept ERG covers the fee, so no funding
+  // box is required. Optionally fold in one of the wallet's own boxes to consolidate
+  // (best-effort; needs the node's extra index). Never fails if none is found.
   let funding = null;
-  if (mine && mine.length) funding = mine[0].box || mine[0];
-  if (!funding) {
-    const bx = await jget(`${NODE_URL}/blockchain/box/unspent/byAddress`, {}).catch(() => null); // may 404
-    funding = bx && bx.items && bx.items[0];
-  }
-  if (!funding) throw new Error('no wallet funding box found (enable node wallet API or set a funded address)');
+  try {
+    const r = await fetch(`${NODE_URL}/blockchain/box/unspent/byAddress?limit=1&sortDirection=desc&includeUnconfirmed=false`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'rent-sweeper/1.0' },
+      body: JSON.stringify(myAddress),
+    });
+    if (r.ok) { const j = await r.json(); funding = (j.items || j || [])[0] || null; }
+  } catch { /* no extra index / no boxes — self-fund */ }
 
-  const allIn = [...boxes, funding];
+  const allIn = funding ? [...boxes, funding] : [...boxes];
   const inputs = ergoLib.ErgoBoxes.from_boxes(allIn.map(b => ergoLib.ErgoBox.from_json(JSON.stringify(b))));
 
   const totalIn = allIn.reduce((a, b) => a + BigInt(b.value), 0n);
   const outValue = totalIn - FEE;
-  if (outValue < 1_000_000n) throw new Error('output below min box value');
+  if (outValue < 1_000_000n) throw new Error(`batch self-funds too little (${Number(totalIn) / 1e9} ERG ≤ fee+min); needs more boxes or a funding box`);
 
   // aggregate tokens across swept boxes + funding
   const tokMap = new Map();
