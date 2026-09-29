@@ -22,5 +22,14 @@ module.exports = {
       autorestart: true,
       max_restarts: 20,
     },
+    {
+      // Pool self-harvest analysis: a one-shot script pm2 re-runs on a schedule.
+      name: 'harvester-analysis',
+      script: 'harvester-analysis.js',
+      cwd: __dirname,
+      node_args: '--env-file=.env',   // reads ERGO_NODE_URL, BLOCKS, EXPLORER_URL from .env
+      autorestart: false,             // it exits after writing harvester-report.json…
+      cron_restart: '0 * * * *',      // …and pm2 re-runs it at the top of every hour
+    },
   ],
 };
