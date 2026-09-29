@@ -30,6 +30,8 @@
  */
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 // ==================== CONFIG ====================
 const NODE_URL = (process.env.ERGO_NODE_URL || 'http://127.0.0.1:9053').replace(/\/$/, '');
@@ -223,6 +225,19 @@ const server = http.createServer((req, res) => {
 
   if (p === '/health') {
     return send(res, 200, { ok: state.ready, height: state.height, lastScan: state.generatedAt, scanning, cached: cache.size });
+  }
+  // Public sweeper statistics (written by rent-sweeper.js in this directory).
+  if (p === '/sweeper/stats') {
+    try { return send(res, 200, JSON.parse(fs.readFileSync(path.join(__dirname, 'sweeper-stats.json'), 'utf8'))); }
+    catch { return send(res, 200, { status: 'success', running: false, message: 'sweeper has not run yet' }); }
+  }
+  if (p === '/sweeper/log') {
+    const limit = Math.min(Number(url.searchParams.get('limit') || 50), 500);
+    try {
+      const lines = fs.readFileSync(path.join(__dirname, 'sweeper-log.jsonl'), 'utf8').trim().split('\n');
+      const rows = lines.slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse();
+      return send(res, 200, { status: 'success', count: rows.length, rows });
+    } catch { return send(res, 200, { status: 'success', count: 0, rows: [] }); }
   }
   if (!state.ready) return send(res, 503, { status: 'error', data: { code: 503, name: 'warming-up', message: 'first scan in progress' } });
 

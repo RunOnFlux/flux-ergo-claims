@@ -3,3 +3,6 @@ node_modules/
 # runtime outputs from the rent monitors (regenerated on each run)
 bot/*-snapshot.json
 bot/shield-log.jsonl
+rent-api/*-snapshot.json
+rent-api/sweeper-stats.json
+rent-api/sweeper-log.jsonl

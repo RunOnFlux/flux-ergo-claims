@@ -156,6 +156,10 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
     <button class="go" style="margin-top:0;flex:1;min-width:140px" onclick="loadWatch()">Refresh</button>
   </div>
   <div id="watch-stats"></div>
+  <div id="sweeper-panel" style="display:none;margin:1rem 0;padding:1rem;border-radius:12px;background:var(--card2);border:1px solid var(--border)">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--subtle);margin-bottom:.6rem">🤝 Community Sweeper — transparency</div>
+    <div id="sweeper-stats"></div>
+  </div>
   <div id="watch-result"><div class="spinner">Loading live feed…</div></div>
   <div class="tiny">Served by <code>rent-api</code> on a Flux Ergo node. Read-only public data. Auto-refreshes while this tab is open.</div>
 </div>
@@ -459,7 +463,19 @@ out.innerHTML=`<div class="verdict v-warn">⚠ ${due.length.toLocaleString()} ${
 // ---- RENT WATCH: live feed from the Flux-operated Ergo node (rent-api) ----
 const RENT_API='https://api.ergo.runonflux.com';
 let watchLoaded=false,watchTimer=null;
-function onWatchOpen(){if(!watchLoaded)loadWatch();if(!watchTimer)watchTimer=setInterval(()=>{if(document.getElementById('tab-watch').style.display!=='none')loadWatch();},60000);}
+function onWatchOpen(){if(!watchLoaded){loadWatch();loadSweeperStats();}if(!watchTimer)watchTimer=setInterval(()=>{if(document.getElementById('tab-watch').style.display!=='none'){loadWatch();loadSweeperStats();}},60000);}
+function loadSweeperStats(){fetch(RENT_API+'/sweeper/stats',{cache:'no-store'}).then(r=>r.json()).then(s=>{
+  const panel=document.getElementById('sweeper-panel'),out=document.getElementById('sweeper-stats');
+  if(!s||s.running===false||s.txsSubmitted===undefined){panel.style.display='none';return;}
+  panel.style.display='block';
+  const erg=n=>(Number(n||0)/1e9).toLocaleString(undefined,{maximumFractionDigits:3});
+  out.innerHTML=`<div class="stats-grid">
+    <div class="stat"><div class="num">${(s.boxesSwept||0).toLocaleString()}</div><div class="lbl">boxes swept</div></div>
+    <div class="stat"><div class="num">${erg(s.ergRecoveredNano)}</div><div class="lbl">ERG recovered</div></div>
+    <div class="stat"><div class="num">${erg(s.feesPaidNano)}</div><div class="lbl">ERG spent on fees</div></div>
+    <div class="stat"><div class="num" style="color:${(s.netProfitNano||0)>=0?'var(--ok)':'var(--crit)'}">${erg(s.netProfitNano)}</div><div class="lbl">net ERG</div></div>
+  </div><div class="meta">mode: <b>${s.mode||'?'}</b> · dest ${s.dest?s.dest.slice(0,12)+'…':'?'} · ${(s.tokensKept||0).toLocaleString()} tokens kept · txs ${s.txsSubmitted||0} (${s.txsInvalidated||0} sniped) · updated ${s.updatedAt?new Date(s.updatedAt).toISOString().slice(0,16).replace('T',' '):'—'}</div>`;
+}).catch(()=>{document.getElementById('sweeper-panel').style.display='none';});}
 function wErg(nano){return(Number(nano)/1e9)}
 function wTokens(r){if(!r.tokens||!r.tokens.length)return'<span style="color:var(--subtle)">(ERG only)</span>';return r.tokens.map(t=>t.label||TN[t.tokenId]||t.tokenId.slice(0,8)+'…').join(', ')}
 async function loadWatch(){

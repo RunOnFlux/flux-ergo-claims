@@ -19,5 +19,23 @@ module.exports = {
         // CONCURRENCY: '12',
       },
     },
+    {
+      name: 'rent-sweeper',
+      script: 'rent-sweeper.js',
+      cwd: __dirname,
+      instances: 1,
+      autorestart: true,
+      max_restarts: 20,
+      env: {
+        ERGO_NODE_URL: 'http://127.0.0.1:9053',
+        RENT_API_URL: 'http://127.0.0.1:8480',
+        // SWEEP_MNEMONIC: set this in the environment, NOT in the repo
+        DRY_RUN: '1',              // SAFE: builds + logs, does not broadcast. Set '0' to go live.
+        // SAFE_ADDRESS: '9...',   // where sweeps go; defaults to the wallet address
+        // BATCH_CAP: '20',
+        // MIN_MARGIN: '2000000',  // 0.002 ERG
+        // KEEP_TOKENS: '1',       // '0' burns tokens instead of keeping them
+      },
+    },
   ],
 };

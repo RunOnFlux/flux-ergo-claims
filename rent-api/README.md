@@ -24,6 +24,8 @@ memory: **spent status comes from the node's UTXO set** (`/utxo/byId/{id}` →
 | `GET /rent/summary` | `height`, `generatedAt`, `totals`, `window` |
 | `GET /rent/boxes?status=collectable&withTokens=1&limit=300` | summary + `rows[]` |
 | `GET /health` | `{ ok, height, lastScan, scanning, cached }` |
+| `GET /sweeper/stats` | live sweeper totals (fees paid, ERG recovered, net, boxes swept) — public |
+| `GET /sweeper/log?limit=` | recent sweeper tx records |
 | `GET /` | plain-text status |
 
 Row: `{ boxId, valueNano, settlementHeight, eligibleAt, eligibleInBlocks, status, drainable, tokenCount, tokens[] }`.
@@ -92,3 +94,46 @@ CORS is emitted by the service itself (`ALLOW_ORIGIN`), so nginx only needs to
 proxy. The site's RENT WATCH tab points at `https://api.ergo.runonflux.com`
 (set as `RENT_API` in `site/index.html`); until the service is live the tab
 degrades gracefully to a "feed unavailable" notice.
+
+---
+
+## rent-sweeper.js — automated collector
+
+Runs alongside the node and rent-api. Every block it pulls currently-collectable
+boxes, keeps the **whole-takeable** ones (value ≤ the box's own storage fee =
+`bytes × storageFeeFactor`), packs a moderate batch, and sweeps them into one
+consolidated output — self-funding from the swept ERG. It writes public stats
+(`sweeper-stats.json`) and a per-tx log (`sweeper-log.jsonl`) that rent-api serves.
+
+**Safe by default:** `DRY_RUN=1` builds and logs the intended transactions but does
+**not** broadcast. Inspect them, then set `DRY_RUN=0` to go live.
+
+```bash
+SWEEP_MNEMONIC="your twelve words" DRY_RUN=1 node rent-sweeper.js
+```
+
+### Config (env)
+| Var | Default | Notes |
+|---|---|---|
+| `SWEEP_MNEMONIC` | — | wallet that funds the tx and receives sweeps (**required**) |
+| `DRY_RUN` | `1` | `1` = build+log only; `0` = broadcast |
+| `SAFE_ADDRESS` | wallet addr | where swept funds go (set to a public safe address for defensive sweep-and-return) |
+| `BATCH_CAP` | `20` | boxes per tx — small enough to limit whole-tx invalidation if a rival snipes an input |
+| `MIN_MARGIN` | `2000000` | require net ≥ 0.002 ERG before broadcasting |
+| `KEEP_TOKENS` | `1` | keep tokens/NFTs (`0` burns them) |
+| `RENT_API_URL` | `http://127.0.0.1:8480` | candidate source |
+
+### Strategy
+Sweep **every block** (the fee is negligible and waiting donates boxes to faster
+competitors); cap the batch so one sniped input can't void a huge tx; fold the
+previous output box in as an input to consolidate for free; only broadcast when
+`recoverable − fee ≥ MIN_MARGIN`. Only **whole-takeable** boxes are targeted —
+funded boxes (value > fee) would each need a recreated output and only yield the
+~0.13 ERG rent fee; that mode (`SWEEP_FUNDED`) is a TODO.
+
+### Notes
+- Needs Node 18+ and `ergo-lib-wasm-nodejs`. The tx-building/signing calls are
+  written against the same library `bot/shield.js` uses; method names can shift
+  across ergo-lib versions — validate a DRY_RUN tx against your node before going live.
+- `pm2 start ecosystem.config.js` starts both rent-api and rent-sweeper (sweeper
+  ships with `DRY_RUN=1`). Put `SWEEP_MNEMONIC` in the environment, never in the repo.
