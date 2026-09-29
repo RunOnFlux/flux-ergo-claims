@@ -59,6 +59,7 @@ const SWEEP_DUST = process.env.SWEEP_DUST !== '0';        // race for whole-take
 const BID_ESCALATE = Number(process.env.BID_ESCALATE || 1.6);        // fee multiplier per loss
 const BID_MAX_FRACTION = Number(process.env.BID_MAX_FRACTION || 0.4); // never bid more than this share of box value
 const bidFee = new Map(); // boxId -> current fee (nanoERG, BigInt)
+const pending = new Map(); // txId -> submitted-but-unconfirmed sweep, credited only once mined
 const VERBOSE = process.env.VERBOSE !== '0'; // per-box logs: competitor fee, our bid, win/lose reason
 const POLL_MS = Number(process.env.POLL_MS || 1_500);      // fast block detection — act the instant a block lands
 const STATS_FILE = path.join(__dirname, 'sweeper-stats.json');
@@ -75,6 +76,16 @@ async function jget(url, { allow404 = false } = {}) {
   return r.json();
 }
 const getInfo = () => jget(`${NODE_URL}/info`);
+const EXPLORER = (process.env.EXPLORER_URL || 'https://api.ergoplatform.com').replace(/\/$/, '');
+const CONFIRM_AFTER = Number(process.env.CONFIRM_AFTER || 2); // blocks to wait before checking a submitted tx
+
+// Who spent a box: returns the spending txId, null if still unspent, undefined if unknown.
+// Tries the node's extra index first, then the explorer.
+async function boxSpentBy(boxId) {
+  try { const b = await jget(`${NODE_URL}/blockchain/box/byId/${boxId}`, { allow404: true }); if (b) return b.spentTransactionId || null; } catch {}
+  try { const b = await jget(`${EXPLORER}/api/v1/boxes/${boxId}`, { allow404: true }); if (b) return b.spentTransactionId || null; } catch {}
+  return undefined;
+}
 
 // Scan the whole mempool once and map each spent input boxId -> the competing tx's
 // fee and size, so we can read a rival's exact fee/byte and bid just above it.
@@ -327,14 +338,13 @@ async function processBatch(kind, boxes, height, built) {
   } else {
     try {
       const txId = await submitTx(finalTx);
-      for (const b of boxes) { inFlight.set(b.boxId, height); bidFee.delete(b.boxId); } // won: stop tracking/bidding it
-      stats.txsSubmitted++; stats.boxesSwept += boxes.length; stats.boxesTokenBearing += tokenBoxes;
-      stats.ergRecoveredNano += Number(outValue); stats.feesPaidNano += Number(feePaid);
-      stats.tokensKept += kept; stats.tokensBurned += burned;
-      stats[kind === 'funded' ? 'fundedWins' : 'dustWins'] = (stats[kind === 'funded' ? 'fundedWins' : 'dustWins'] || 0) + 1;
-      stats.lastTxId = txId; stats.lastSweepAt = new Date().toISOString();
-      saveStats(); logLine({ mode: 'live', txId, ...rec });
-      console.log(`[${height}] ✅ WON ${kind} ${boxes[0].boxId.slice(0, 10)}… +${(Number(outValue) / 1e9).toFixed(4)} ERG (fee ${(Number(feePaid) / 1e9).toFixed(4)}) -> ${txId.slice(0, 12)}…`);
+      // 200 = accepted into MEMPOOL, not mined. Record as pending; credit only once the
+      // input box is confirmed spent by THIS txId (checked a couple of blocks later).
+      for (const b of boxes) inFlight.set(b.boxId, height);
+      stats.txsSubmitted++; stats.lastTxId = txId; stats.lastSubmitAt = new Date().toISOString();
+      pending.set(txId, { boxId: boxes[0].boxId, height, kind, outValue: Number(outValue), feePaid: Number(feePaid), tokenBoxes, kept, burned });
+      saveStats(); logLine({ mode: 'submitted', txId, ...rec });
+      console.log(`[${height}] → SUBMITTED ${kind} ${boxes[0].boxId.slice(0, 10)}… fee ${(Number(feePaid) / 1e9).toFixed(4)} -> ${txId.slice(0, 12)}… (pending)`);
     } catch (e) {
       const lost = /already spent|double|missing/i.test(e.message);
       if (lost) {
@@ -344,6 +354,34 @@ async function processBatch(kind, boxes, height, built) {
       const reason = e.message.replace(/\s+/g, ' ').replace(/^submit \d+: /, '').slice(0, 160);
       saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
       console.log(`[${height}] ${lost ? '❌ LOST' : '⚠ ERR '} ${kind} ${boxes[0].boxId.slice(0, 10)}… — ${reason}`);
+    }
+  }
+}
+
+// Verify submitted txs actually mined (input box spent by OUR txId); credit only then.
+async function confirmPending(height) {
+  for (const [txId, p] of [...pending]) {
+    if (height - p.height < CONFIRM_AFTER) continue;
+    const spender = await boxSpentBy(p.boxId);
+    if (spender === undefined) continue; // unknown right now, re-check next block
+    pending.delete(txId);
+    const net = (p.outValue / 1e9).toFixed(4), fee = (p.feePaid / 1e9).toFixed(4), tag = `${p.kind} ${p.boxId.slice(0, 10)}…`;
+    if (spender === txId) {                                  // CONFIRMED — we actually collected it
+      bidFee.delete(p.boxId);
+      stats.boxesSwept++; stats.boxesTokenBearing += p.tokenBoxes;
+      stats.ergRecoveredNano += p.outValue; stats.feesPaidNano += p.feePaid;
+      stats.tokensKept += p.kept; stats.tokensBurned += p.burned;
+      stats[p.kind === 'funded' ? 'fundedWins' : 'dustWins'] = (stats[p.kind === 'funded' ? 'fundedWins' : 'dustWins'] || 0) + 1;
+      stats.lastSweepAt = new Date().toISOString();
+      saveStats(); logLine({ mode: 'confirmed', txId, boxId: p.boxId, kind: p.kind, netNano: p.outValue });
+      console.log(`[${height}] ✅ CONFIRMED ${tag} +${net} ERG (fee ${fee}) -> ${txId.slice(0, 12)}…`);
+    } else if (spender) {                                    // a rival's tx mined it instead
+      stats.racesLost = (stats.racesLost || 0) + 1;
+      saveStats(); logLine({ mode: 'lost-confirmed', txId, boxId: p.boxId, winner: spender });
+      console.log(`[${height}] ✖ LOST ${tag} — rival ${spender.slice(0, 10)}… mined it`);
+    } else {                                                 // still unspent: our tx dropped, box still open
+      saveStats(); logLine({ mode: 'dropped', txId, boxId: p.boxId });
+      console.log(`[${height}] ↺ DROPPED ${tag} — not mined, box still open (will retry)`);
     }
   }
 }
@@ -358,6 +396,7 @@ async function tick() {
     if (height === lastHeight) { working = false; return; }
     lastHeight = height;
     for (const [id, h] of inFlight) if (height - h >= 3) inFlight.delete(id); // prune confirmed/dropped
+    await confirmPending(height); // credit real (mined) collections, detect drops/losses
 
     const { dust, funded, diag } = await candidates(height);
     if (!dust.length && !funded.length) {
