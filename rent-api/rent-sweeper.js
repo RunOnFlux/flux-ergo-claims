@@ -268,7 +268,9 @@ async function tick() {
 function buildStateCtx(headers) {
   const bh = ergoLib.BlockHeaders.from_json(headers);
   const pre = ergoLib.PreHeader.from_block_header(bh.get(0));
-  return new ergoLib.ErgoStateContext(pre, bh);
+  // Newer ergo-lib requires a Parameters instance as the 3rd arg.
+  const params = ergoLib.Parameters.default_parameters();
+  return new ergoLib.ErgoStateContext(pre, bh, params);
 }
 
 // ==================== BOOT ====================
