@@ -137,19 +137,23 @@ function wholeTakeable(boxJson) {
 async function candidates(height) {
   // rent-api gives collectable boxes network-wide; re-verify each against the UTXO
   // set (still unspent) and confirm whole-takeable via its real byte size.
-  const d = await jget(`${RENT_API}/rent/boxes?status=collectable&limit=1000`).catch(() => null);
+  const diag = { apiReachable: true, collectable: 0, sniped: 0, funded: 0, tooSmall: 0, notEligible: 0 };
+  let d;
+  try { d = await jget(`${RENT_API}/rent/boxes?status=collectable&limit=1000`); }
+  catch { diag.apiReachable = false; return { boxes: [], diag }; }
   const rows = (d && d.rows) || [];
+  diag.collectable = rows.length;
   const out = [];
   for (const r of rows) {
     if (out.length >= BATCH_CAP) break;
     const box = await getUtxo(r.boxId);          // 404 => already swept by someone
-    if (!box) continue;
-    if (box.creationHeight != null && height - box.creationHeight < STORAGE_PERIOD) continue; // guard
-    if (!wholeTakeable(box)) continue;           // funded box -> skip (needs recreation)
-    if (BigInt(box.value) < MIN_BOX_TAKE) continue;
+    if (!box) { diag.sniped++; continue; }
+    if (box.creationHeight != null && height - box.creationHeight < STORAGE_PERIOD) { diag.notEligible++; continue; }
+    if (!wholeTakeable(box)) { diag.funded++; continue; } // funded box -> skip (needs recreation)
+    if (BigInt(box.value) < MIN_BOX_TAKE) { diag.tooSmall++; continue; }
     out.push(box);
   }
-  return out;
+  return { boxes: out, diag };
 }
 
 // ==================== TX BUILD ====================
@@ -227,8 +231,12 @@ async function tick() {
     if (height === lastHeight) { working = false; return; }
     lastHeight = height;
 
-    const boxes = await candidates(height);
-    if (!boxes.length) { console.log(`[${height}] nothing whole-takeable`); working = false; return; }
+    const { boxes, diag } = await candidates(height);
+    if (!boxes.length) {
+      if (!diag.apiReachable) console.log(`[${height}] rent-api UNREACHABLE at ${RENT_API} — is it running on this host? (set RENT_API_URL)`);
+      else console.log(`[${height}] nothing to sweep · collectable ${diag.collectable} → funded ${diag.funded}, already-spent ${diag.sniped}, below-min ${diag.tooSmall}, not-yet-eligible ${diag.notEligible}`);
+      working = false; return;
+    }
 
     const recoverable = boxes.reduce((a, b) => a + BigInt(b.value), 0n);
     if (recoverable - FEE < MIN_MARGIN) { console.log(`[${height}] ${boxes.length} boxes but net < margin`); working = false; return; }
