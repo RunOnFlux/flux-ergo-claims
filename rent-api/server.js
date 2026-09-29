@@ -295,6 +295,12 @@ const server = http.createServer((req, res) => {
   // Live fee-war evidence — independent of the box scan, always available.
   if (p === '/rent/feewar') return send(res, 200, feeWar);
 
+  // Pool self-harvest analysis (written by harvester-analysis.js, run on a cron).
+  if (p === '/rent/harvesters') {
+    try { return send(res, 200, JSON.parse(fs.readFileSync(path.join(__dirname, 'harvester-report.json'), 'utf8'))); }
+    catch { return send(res, 200, { status: 'success', ready: false, message: 'harvester-analysis has not run yet' }); }
+  }
+
   if (!state.ready) return send(res, 503, { status: 'error', data: { code: 503, name: 'warming-up', message: 'first scan in progress' } });
 
   const summary = {

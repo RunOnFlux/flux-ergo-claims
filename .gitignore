@@ -10,3 +10,4 @@ rent-api/sweeper-log.jsonl
 .env
 *.env
 !*.env.example
+rent-api/harvester-report.json

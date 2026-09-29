@@ -160,6 +160,10 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
     <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--crit);margin-bottom:.6rem">🔥 Live fee war — value flowing to miners</div>
     <div id="feewar-stats"></div>
   </div>
+  <div id="harvester-panel" style="display:none;margin:1rem 0;padding:1rem;border-radius:12px;background:var(--card2);border:1px solid var(--border)">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--subtle);margin-bottom:.6rem">⛏ Who mines the harvest — pool self-collection pattern</div>
+    <div id="harvester-stats"></div>
+  </div>
   <div id="sweeper-panel" style="display:none;margin:1rem 0;padding:1rem;border-radius:12px;background:var(--card2);border:1px solid var(--border)">
     <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--subtle);margin-bottom:.6rem">🤝 Community Sweeper — transparency</div>
     <div id="sweeper-stats"></div>
@@ -467,7 +471,25 @@ out.innerHTML=`<div class="verdict v-warn">⚠ ${due.length.toLocaleString()} ${
 // ---- RENT WATCH: live feed from the Flux-operated Ergo node (rent-api) ----
 const RENT_API='https://api.ergo.runonflux.com';
 let watchLoaded=false,watchTimer=null;
-function onWatchOpen(){if(!watchLoaded){loadWatch();loadSweeperStats();loadFeeWar();}if(!watchTimer)watchTimer=setInterval(()=>{if(document.getElementById('tab-watch').style.display!=='none'){loadWatch();loadSweeperStats();loadFeeWar();}},60000);}
+function onWatchOpen(){if(!watchLoaded){loadWatch();loadSweeperStats();loadFeeWar();loadHarvesters();}if(!watchTimer)watchTimer=setInterval(()=>{if(document.getElementById('tab-watch').style.display!=='none'){loadWatch();loadSweeperStats();loadFeeWar();}},60000);}
+function loadHarvesters(){fetch(RENT_API+'/rent/harvesters',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+  const panel=document.getElementById('harvester-panel'),out=document.getElementById('harvester-stats');
+  if(!d||d.ready===false||!d.pools){panel.style.display='none';return;}
+  panel.style.display='block';
+  const erg=n=>(Number(n||0)/1e9).toLocaleString(undefined,{maximumFractionDigits:3});
+  const t=d.totals||{};
+  out.innerHTML=`<div class="stats-grid">
+    <div class="stat"><div class="num">${(d.blocksAnalyzed||0).toLocaleString()}</div><div class="lbl">blocks analyzed</div></div>
+    <div class="stat"><div class="num">${(t.harvestTxs||0).toLocaleString()}</div><div class="lbl">rent collections mined</div></div>
+    <div class="stat"><div class="num" style="color:var(--crit)">${erg(t.harvestFeesNano)}</div><div class="lbl">ERG fees to miners</div></div>
+    <div class="stat"><div class="num" style="color:var(--crit)">${(t.irrational||0).toLocaleString()}</div><div class="lbl">irrational-fee (self-harvest)</div></div>
+  </div>`;
+  let h='<table><tr><th>miner / pool</th><th>blocks</th><th>with harvest</th><th>harvest txs</th><th>fees (ERG)</th><th>self-harvest⚑</th></tr>';
+  d.pools.slice(0,12).forEach(p=>{const share=p.blocksMined?Math.round(100*p.blocksWithHarvest/p.blocksMined):0;
+    h+=`<tr><td>${p.address?('<a href="https://ergexplorer.com/addresses/'+p.address+'" target="_blank">'+String(p.miner).slice(0,14)+'…</a>'):String(p.miner).slice(0,16)}</td><td>${p.blocksMined}</td><td>${p.blocksWithHarvest} (${share}%)</td><td>${p.harvestTxs}</td><td>${erg(p.harvestFeesNano)}</td><td class="${p.irrationalHarvests>0?'crit':''}">${p.irrationalHarvests}</td></tr>`});
+  out.innerHTML+=h+'</table>';
+  out.innerHTML+=`<div class="tiny" style="margin-top:.6rem">A rent-collection tx paying a fee far above the 0.001 ERG norm hands most of a box's value to the block's miner — <b>only rational if the collector is the miner</b> (the fee returns to them). Pools whose own blocks repeatedly contain such txs are self-harvesting. Blocks ${d.fromHeight}–${d.toHeight} · observed on-chain pattern, presented as data.</div>`;
+}).catch(()=>{document.getElementById('harvester-panel').style.display='none';});}
 function loadFeeWar(){fetch(RENT_API+'/rent/feewar',{cache:'no-store'}).then(r=>r.json()).then(d=>{
   const panel=document.getElementById('feewar-panel'),out=document.getElementById('feewar-stats');
   if(!d||d.generatedAt===null||d.rentCollectionTxs===undefined){panel.style.display='none';return;}
