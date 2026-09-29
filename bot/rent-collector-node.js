@@ -85,7 +85,7 @@ function classify(o, settlementHeight, height) {
     boxId: o.boxId || o.id,
     address: o.address,
     valueNano: Number(o.value),
-    value: (Number(o.value) / 1e8).toFixed(4),
+    value: (Number(o.value) / 1e9).toFixed(4), // ERG = 1e9 nanoERG
     settlementHeight,
     eligibleAt,
     eligibleInBlocks: inBlocks,

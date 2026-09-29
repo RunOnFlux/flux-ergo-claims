@@ -42,7 +42,7 @@ const LOOKAHEAD_BLOCKS = Math.round((LOOKAHEAD_DAYS * 86400) / BLOCK_SECONDS);
 // boxes is better served by rent-collector-node.js (node block-walk).
 const SHOW_OVERDUE = process.env.SHOW_OVERDUE === '1';
 const OVERDUE_LOOKBACK_BLOCKS = Number(process.env.OVERDUE_LOOKBACK_BLOCKS || 2000);
-const DUST_THRESHOLD = 150_000_000;       // nanoERG (1.5 ERG) — low-value flag (shield.js parity)
+const DUST_THRESHOLD = 150_000_000;       // nanoERG (0.15 ERG) — low-value flag (shield.js parity)
 const REFRESH_MS = Number(process.env.REFRESH_MS || 180_000); // 3 min default
 const GQL_TIMEOUT_MS = 45_000;
 const PAGE = 50;
@@ -109,7 +109,7 @@ function human(blocks) {
   if (h) return `${h}h ${m}m`;
   return `${m}m`;
 }
-const erg = n => (Number(n) / 1e8).toFixed(4);
+const erg = n => (Number(n) / 1e9).toFixed(4); // ERG = 1e9 nanoERG
 const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 const padL = (s, n) => String(s).padStart(n);
 
