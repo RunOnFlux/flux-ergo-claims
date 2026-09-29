@@ -221,7 +221,9 @@ async function buildFundedSweep(boxes, height) {
     if (keepVal < 1_000_000n) continue;               // recreation would fall below min box value — skip
     const idx = recreations.length;                   // this box's recreation output index
     recreations.push({
-      value: Number(keepVal), ergoTree: b.ergoTree, creationHeight: height,
+      // storage-rent check requires the recreation's creationHeight == the validation
+      // height, which is the NEXT block (fullHeight + 1), not the current tip.
+      value: Number(keepVal), ergoTree: b.ergoTree, creationHeight: height + 1,
       assets: (b.assets || []).map(a => ({ tokenId: a.tokenId, amount: Number(a.amount) })),
       additionalRegisters: b.additionalRegisters || {},
     });
