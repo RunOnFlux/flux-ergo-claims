@@ -59,6 +59,7 @@ const SWEEP_DUST = process.env.SWEEP_DUST !== '0';        // race for whole-take
 const BID_ESCALATE = Number(process.env.BID_ESCALATE || 1.6);        // fee multiplier per loss
 const BID_MAX_FRACTION = Number(process.env.BID_MAX_FRACTION || 0.4); // never bid more than this share of box value
 const bidFee = new Map(); // boxId -> current fee (nanoERG, BigInt)
+const VERBOSE = process.env.VERBOSE !== '0'; // per-box logs: competitor fee, our bid, win/lose reason
 const POLL_MS = Number(process.env.POLL_MS || 1_500);      // fast block detection — act the instant a block lands
 const STATS_FILE = path.join(__dirname, 'sweeper-stats.json');
 const LOG_FILE = path.join(__dirname, 'sweeper-log.jsonl');
@@ -74,6 +75,28 @@ async function jget(url, { allow404 = false } = {}) {
   return r.json();
 }
 const getInfo = () => jget(`${NODE_URL}/info`);
+
+// Scan the whole mempool once and map each spent input boxId -> the competing tx's
+// fee and size, so we can read a rival's exact fee/byte and bid just above it.
+async function fetchMempoolConflicts() {
+  const map = new Map();
+  try {
+    for (let off = 0, p = 0; p < 20; p++, off += 100) {
+      const txs = await jget(`${NODE_URL}/transactions/unconfirmed?limit=100&offset=${off}`);
+      const arr = Array.isArray(txs) ? txs : (txs && txs.items) || [];
+      if (!arr.length) break;
+      for (const t of arr) {
+        const fee = (t.outputs || []).filter(o => (o.ergoTree || '').startsWith('1005040004000e36'))
+          .reduce((a, o) => a + Number(o.value), 0);
+        const size = t.size || 300;
+        for (const inp of t.inputs || []) if (!map.has(inp.boxId)) map.set(inp.boxId, { fee, size, weight: fee / size });
+      }
+      if (arr.length < 100) break;
+    }
+  } catch (e) { if (VERBOSE) console.log(`  [mempool] scan failed: ${e.message}`); }
+  return map;
+}
+
 // CONFIRMED UTXO set (not withPool): we WANT to still see boxes sitting in a rival's
 // mempool tx so we can out-bid and replace them (Ergo fee-replacement). A box that is
 // truly mined-spent 404s here and is skipped. Our own pending txs are avoided via the
@@ -196,14 +219,31 @@ function p2pkErgoTree(addrB58) {
   return '0008cd' + Buffer.from(a.content_bytes()).toString('hex'); // P2PK: 0008cd + 33-byte pubkey
 }
 
-// current bid fee for a box (escalates each time we lose it), and the escalation on loss
+// current bid fee for a box (escalates each time we lose it), and the escalation on loss.
+// `take` = what WE collect from this box (dust: whole value; funded: the storage fee),
+// so the cap is a share of our actual take, never the box's face value.
 const getBid = (box) => bidFee.get(box.boxId) || FEE;
-function escalateBid(box) {
+function escalateBid(box, take) {
   const cur = getBid(box);
-  const cap = BigInt(Math.floor(Number(box.value) * BID_MAX_FRACTION)); // never bid past this share of value
+  const cap = BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
   let next = BigInt(Math.floor(Number(cur) * BID_ESCALATE));
   if (next > cap) next = cap;
   if (next > cur) bidFee.set(box.boxId, next); // else already at cap — competitor values it more than we can pay
+}
+// Pick the fee for a box: max of (escalated floor, just-above any rival in the mempool),
+// capped at a share of our take. Returns { fee, cap, rival } for logging/decisions.
+function chooseFee(box, take, conflicts) {
+  const cap = BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
+  let fee = getBid(box);                                   // floor from prior losses
+  const rival = conflicts.get(box.boxId);
+  if (rival) {
+    const beat = BigInt(Math.ceil(rival.fee * 1.12)) + 2000n; // ~12% over their fee to out-weight despite size diff
+    if (beat > fee) fee = beat;
+  }
+  if (fee < FEE) fee = FEE;
+  const capped = fee > cap;
+  if (capped) fee = cap;
+  return { fee, cap, rival, capped };
 }
 
 async function buildSweep(boxes, height, fee = FEE) {
@@ -236,7 +276,7 @@ async function buildSweep(boxes, height, fee = FEE) {
 // RECREATE each box (same ergoTree, tokens, R4-R9 registers; value - fee; creation
 // height = now) at its own output index, point that input's ctx-var 127 at it, and
 // collect the freed fees (Σfee - minerFee) to destAddress. Tokens return to owners.
-async function buildFundedSweep(boxes, height) {
+async function buildFundedSweep(boxes, height, minerFee = FEE) {
   const recreations = [], inputs = [];
   let totalFee = 0n;
   for (const b of boxes) {
@@ -255,14 +295,14 @@ async function buildFundedSweep(boxes, height) {
     totalFee += fee;
   }
   if (!inputs.length) throw new Error('no funded boxes recreatable (all near fee boundary)');
-  const profit = totalFee - FEE;
-  if (profit < 1_000_000n) throw new Error(`funded batch profit ${Number(profit) / 1e9} ERG below min output`);
+  const profit = totalFee - minerFee;
+  if (profit < 1_000_000n) throw new Error(`funded profit ${Number(profit) / 1e9} ERG below min output (fee bid too high)`);
   const outputs = [
     ...recreations,                                                                                   // 0 .. N-1
     { value: Number(profit), ergoTree: p2pkErgoTree(destAddress), creationHeight: height, assets: [], additionalRegisters: {} }, // N: our fee take
-    { value: Number(FEE), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },                     // N+1: miner fee
+    { value: Number(minerFee), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },                // N+1: miner fee
   ];
-  return { finalTx: { inputs, dataInputs: [], outputs }, outValue: profit, feePaid: FEE, kept: 0, burned: 0, tokenBoxes: 0 };
+  return { finalTx: { inputs, dataInputs: [], outputs }, outValue: profit, feePaid: minerFee, kept: 0, burned: 0, tokenBoxes: 0, totalFee };
 }
 
 // ==================== BLOCK LOOP ====================
@@ -287,15 +327,16 @@ async function processBatch(kind, boxes, height, built) {
       stats[kind === 'funded' ? 'fundedWins' : 'dustWins'] = (stats[kind === 'funded' ? 'fundedWins' : 'dustWins'] || 0) + 1;
       stats.lastTxId = txId; stats.lastSweepAt = new Date().toISOString();
       saveStats(); logLine({ mode: 'live', txId, ...rec });
-      console.log(`[${height}] WON ${kind} ${boxes.length} boxes -> ${txId} (+${Number(outValue) / 1e9} ERG)`);
+      console.log(`[${height}] ✅ WON ${kind} ${boxes[0].boxId.slice(0, 10)}… +${(Number(outValue) / 1e9).toFixed(4)} ERG (fee ${(Number(feePaid) / 1e9).toFixed(4)}) -> ${txId.slice(0, 12)}…`);
     } catch (e) {
       const lost = /already spent|double|missing/i.test(e.message);
       if (lost) {
         stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1;
-        if (kind === 'dust') for (const b of boxes) escalateBid(b); // out-bid the winner next block
+        for (const b of boxes) escalateBid(b, kind === 'funded' ? storageFee(b) : BigInt(b.value)); // out-bid next block
       } else stats.txsFailed++;
+      const reason = e.message.replace(/\s+/g, ' ').replace(/^submit \d+: /, '').slice(0, 160);
       saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
-      console.log(`[${height}] ${lost ? 'LOST race' : 'submit error'} (${kind}): ${e.message.replace(/\s+/g, ' ').slice(0, 400)}`);
+      console.log(`[${height}] ${lost ? '❌ LOST' : '⚠ ERR '} ${kind} ${boxes[0].boxId.slice(0, 10)}… — ${reason}`);
     }
   }
 }
@@ -318,27 +359,35 @@ async function tick() {
       working = false; return;
     }
 
-    // Dust (whole-take): most contested. Solo/small chunks, fired in PARALLEL so a
-    // snipe on one never blocks the others and we hit the mempool fast. (SWEEP_DUST=0 skips.)
-    if (SWEEP_DUST) {
-      const chunks = [];
-      for (let i = 0; i < dust.length; i += DUST_CHUNK) chunks.push(dust.slice(i, i + DUST_CHUNK));
-      await Promise.all(chunks.map(async chunk => {
-        const recoverable = chunk.reduce((a, b) => a + BigInt(b.value), 0n);
-        const fee = chunk.reduce((m, b) => { const f = getBid(b); return f > m ? f : m; }, FEE); // bid up to beat rivals
-        if (recoverable - fee < MIN_MARGIN) return; // still profitable at this bid?
-        try { await processBatch('dust', chunk, height, await buildSweep(chunk, height, fee)); }
-        catch (e) { console.log(`[${height}] dust build skipped: ${e.message}`); }
-      }));
-    }
-    // Funded batch (recreate + collect fee): less contested, steadier wins.
-    if (funded.length) {
-      try {
-        const built = await buildFundedSweep(funded, height);
-        if (built.outValue >= MIN_MARGIN) await processBatch('funded', funded, height, built);
-        else console.log(`[${height}] funded net ${Number(built.outValue) / 1e9} < margin`);
-      } catch (e) { console.log(`[${height}] funded build skipped: ${e.message}`); }
-    }
+    // Read the whole mempool once so we can bid just above each rival's exact fee.
+    const conflicts = await fetchMempoolConflicts();
+    if (VERBOSE) console.log(`[${height}] dust ${dust.length} · funded ${funded.length} · mempool rivals ${conflicts.size}`);
+
+    // One solo tx per box, fired in parallel. `take` = what WE collect (dust: whole
+    // value; funded: the storage fee), which sets both the profit and the bid cap.
+    const attempt = async (kind, box, take, buildFn) => {
+      const { fee, cap, rival, capped } = chooseFee(box, take, conflicts);
+      const net = take - fee;
+      const tag = `${kind} ${box.boxId.slice(0, 10)}…`;
+      if (rival && fee <= BigInt(Math.floor(rival.fee))) { // capped out — can't out-bid within our profit cap
+        if (VERBOSE) console.log(`  SKIP ${tag}: rival fee ${(rival.fee / 1e9).toFixed(4)} ≥ our cap ${(Number(cap) / 1e9).toFixed(4)} — they value it more`);
+        return;
+      }
+      if (net < MIN_MARGIN) {
+        if (VERBOSE) console.log(`  SKIP ${tag}: net ${(Number(net) / 1e9).toFixed(4)} < margin` +
+          (rival ? ` (rival fee ${(rival.fee / 1e9).toFixed(4)}, need > cap ${(Number(cap) / 1e9).toFixed(4)})` : ''));
+        return;
+      }
+      if (VERBOSE) console.log(`  BID  ${tag}: take ${(Number(take) / 1e9).toFixed(4)} · fee ${(Number(fee) / 1e9).toFixed(4)}` +
+        (rival ? ` vs rival ${(rival.fee / 1e9).toFixed(4)} (w ${rival.weight.toFixed(1)})` : ' (no rival — first in)') + (capped ? ' [CAPPED]' : ''));
+      try { await processBatch(kind, [box], height, await buildFn(fee)); }
+      catch (e) { console.log(`  SKIP ${tag}: build failed — ${e.message}`); }
+    };
+
+    const jobs = [];
+    if (SWEEP_DUST) for (const box of dust) jobs.push(attempt('dust', box, BigInt(box.value), fee => buildSweep([box], height, fee)));
+    for (const box of funded) jobs.push(attempt('funded', box, storageFee(box), fee => buildFundedSweep([box], height, fee)));
+    await Promise.all(jobs);
   } catch (e) { console.error('tick error:', e.message); }
   finally { working = false; }
 }
