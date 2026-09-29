@@ -71,9 +71,11 @@ async function jget(url, { allow404 = false } = {}) {
   return r.json();
 }
 const getInfo = () => jget(`${NODE_URL}/info`);
-// mempool-aware: excludes boxes already spent in the mempool (by us OR competitors),
-// so we don't re-submit our own pending inputs or race an already-pending spend.
-const getUtxo = (boxId) => jget(`${NODE_URL}/utxo/withPool/byId/${boxId}`, { allow404: true });
+// CONFIRMED UTXO set (not withPool): we WANT to still see boxes sitting in a rival's
+// mempool tx so we can out-bid and replace them (Ergo fee-replacement). A box that is
+// truly mined-spent 404s here and is skipped. Our own pending txs are avoided via the
+// inFlight guard (set on wins), not by hiding mempool-spent boxes.
+const getUtxo = (boxId) => jget(`${NODE_URL}/utxo/byId/${boxId}`, { allow404: true });
 async function submitTx(txJson) {
   const r = await fetch(`${NODE_URL}/transactions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txJson),
