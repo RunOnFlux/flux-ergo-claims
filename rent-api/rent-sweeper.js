@@ -157,68 +157,44 @@ async function candidates(height) {
 }
 
 // ==================== TX BUILD ====================
-// Build a sweep of whole-takeable boxes into one consolidated output at destAddress.
-// Rent inputs carry empty proofs (age rule); a wallet funding box signs the tx and
-// also consolidates. Tokens are kept (default) or burned (KEEP_TOKENS=0).
-async function buildSweep(boxes, height, stateCtx) {
-  // A whole-takeable batch SELF-FUNDS: the swept ERG covers the fee, so no funding
-  // box is required. Optionally fold in one of the wallet's own boxes to consolidate
-  // (best-effort; needs the node's extra index). Never fails if none is found.
-  let funding = null;
-  try {
-    const r = await fetch(`${NODE_URL}/blockchain/box/unspent/byAddress?limit=1&sortDirection=desc&includeUnconfirmed=false`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'rent-sweeper/1.0' },
-      body: JSON.stringify(myAddress),
-    });
-    if (r.ok) { const j = await r.json(); funding = (j.items || j || [])[0] || null; }
-  } catch { /* no extra index / no boxes — self-fund */ }
+// Whole-takeable storage-rent spend, built as raw tx JSON (no TxBuilder / no signing
+// needed — the batch self-funds and rent inputs use empty proofs). Per sigma-rust
+// storage_rent.rs: an expired box (age >= STORAGE_PERIOD) with value <= its storage
+// fee is spendable with an EMPTY proof plus context-extension var 127 (STORAGE_
+// EXTENSION_INDEX = i8::MAX) set to the output index (SShort). We point every rent
+// input at output 0 (our consolidated box). SShort(0) serializes to "0300".
+const FEE_TREE = '1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798e0400ea02d192a39a8cc7a70173007301';
+const EXT_OUTPUT0 = '0300'; // serialized SShort constant, value 0 -> output index 0
 
-  const allIn = funding ? [...boxes, funding] : [...boxes];
-  const inputs = ergoLib.ErgoBoxes.from_boxes(allIn.map(b => ergoLib.ErgoBox.from_json(JSON.stringify(b))));
+function p2pkErgoTree(addrB58) {
+  const a = ergoLib.Address.from_base58(addrB58);
+  return '0008cd' + Buffer.from(a.content_bytes()).toString('hex'); // P2PK: 0008cd + 33-byte pubkey
+}
 
-  const totalIn = allIn.reduce((a, b) => a + BigInt(b.value), 0n);
+async function buildSweep(boxes, height) {
+  const totalIn = boxes.reduce((a, b) => a + BigInt(b.value), 0n);
   const outValue = totalIn - FEE;
-  if (outValue < 1_000_000n) throw new Error(`batch self-funds too little (${Number(totalIn) / 1e9} ERG ≤ fee+min); needs more boxes or a funding box`);
+  if (outValue < 1_000_000n) throw new Error(`batch self-funds too little (${Number(totalIn) / 1e9} ERG <= fee+min); need more boxes`);
 
-  // aggregate tokens across swept boxes + funding
+  // aggregate tokens; keep them all (default) or drop = burn (consensus allows it)
   const tokMap = new Map();
-  for (const b of allIn) for (const a of (b.assets || [])) tokMap.set(a.tokenId, (tokMap.get(a.tokenId) || 0n) + BigInt(a.amount));
+  for (const b of boxes) for (const a of (b.assets || [])) tokMap.set(a.tokenId, (tokMap.get(a.tokenId) || 0n) + BigInt(a.amount));
+  // node JSON wants value/amount as numbers (all well under 2^53 here)
+  const assets = KEEP_TOKENS ? [...tokMap].map(([tokenId, amount]) => ({ tokenId, amount: Number(amount) })) : [];
 
-  const outB = new ergoLib.ErgoBoxCandidateBuilder(
-    ergoLib.BoxValue.from_i64(ergoLib.I64.from_str(outValue.toString())),
-    ergoLib.Address.from_base58(destAddress).to_ergo_tree(), height);
+  const outputs = [
+    { value: Number(outValue), ergoTree: p2pkErgoTree(destAddress), creationHeight: height, assets, additionalRegisters: {} },
+    { value: Number(FEE), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },
+  ];
+  const inputs = boxes.map(b => ({ boxId: b.boxId, spendingProof: { proofBytes: '', extension: { '127': EXT_OUTPUT0 } } }));
 
-  let kept = 0, burned = 0, burnTokens = [];
-  for (const [tid, amt] of tokMap) {
-    if (KEEP_TOKENS) {
-      outB.add_token(ergoLib.TokenId.from_str(tid), ergoLib.TokenAmount.from_i64(ergoLib.I64.from_str(amt.toString())));
-      kept++;
-    } else { burnTokens.push({ tid, amt }); burned++; }
-  }
-  const outputs = ergoLib.ErgoBoxCandidates.from_boxes([outB.build()]);
-
-  const txb = ergoLib.TxBuilder.new(
-    new ergoLib.BoxSelection(inputs, new ergoLib.ErgoBoxAssetsDataList()),
-    outputs, height,
-    ergoLib.BoxValue.from_i64(ergoLib.I64.from_str(FEE.toString())),
-    ergoLib.Address.from_base58(destAddress));
-  // NOTE: to burn tokens (KEEP_TOKENS=0) some ergo-lib versions need a burn permit,
-  // e.g. txb.set_token_burn_permit(<Tokens>). Left explicit for you to wire to your version.
-  const unsigned = txb.build();
-
-  // per-input proofs: sign only inputs we own; rent inputs -> empty proof
-  const dataInputs = ergoLib.ErgoBoxes.from_boxes([]);
-  const uj = JSON.parse(unsigned.to_json());
-  const signedInputs = uj.inputs.map((inp, idx) => {
-    try {
-      const si = wallet.sign_transaction_input(stateCtx, unsigned, inputs, dataInputs, idx);
-      return { boxId: inp.boxId, spendingProof: JSON.parse(si.to_json()).spendingProof };
-    } catch {
-      return { boxId: inp.boxId, spendingProof: { proofBytes: '', extension: {} } };
-    }
-  });
-  const finalTx = { inputs: signedInputs, dataInputs: uj.dataInputs || [], outputs: uj.outputs };
-  return { finalTx, outValue, feePaid: FEE, kept, burned, tokenBoxes: boxes.filter(b => (b.assets || []).length).length };
+  const finalTx = { inputs, dataInputs: [], outputs };
+  return {
+    finalTx, outValue, feePaid: FEE,
+    kept: KEEP_TOKENS ? tokMap.size : 0,
+    burned: KEEP_TOKENS ? 0 : tokMap.size,
+    tokenBoxes: boxes.filter(b => (b.assets || []).length).length,
+  };
 }
 
 // ==================== BLOCK LOOP ====================
@@ -242,8 +218,7 @@ async function tick() {
     const recoverable = boxes.reduce((a, b) => a + BigInt(b.value), 0n);
     if (recoverable - FEE < MIN_MARGIN) { console.log(`[${height}] ${boxes.length} boxes but net < margin`); working = false; return; }
 
-    const stateCtx = buildStateCtx(await jget(`${NODE_URL}/blocks/lastHeaders/10`));
-    const { finalTx, outValue, feePaid, kept, burned, tokenBoxes } = await buildSweep(boxes, height, stateCtx);
+    const { finalTx, outValue, feePaid, kept, burned, tokenBoxes } = await buildSweep(boxes, height);
 
     const rec = { height, boxes: boxes.length, tokenBoxes, recoverableNano: recoverable.toString(), feeNano: feePaid.toString(), kept, burned };
     if (DRY_RUN) {
@@ -272,14 +247,6 @@ async function tick() {
     }
   } catch (e) { console.error('tick error:', e.message); }
   finally { working = false; }
-}
-
-function buildStateCtx(headers) {
-  const bh = ergoLib.BlockHeaders.from_json(headers);
-  const pre = ergoLib.PreHeader.from_block_header(bh.get(0));
-  // Newer ergo-lib requires a Parameters instance as the 3rd arg.
-  const params = ergoLib.Parameters.default_parameters();
-  return new ergoLib.ErgoStateContext(pre, bh, params);
 }
 
 // ==================== BOOT ====================
