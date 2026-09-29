@@ -42,7 +42,10 @@ const MNEMONIC = process.env.SWEEP_MNEMONIC || '';
 const PRIVKEY = (process.env.SWEEP_PRIVATE_KEY || '').trim().replace(/^0x/, ''); // raw dlog secret, hex
 const SAFE_ADDRESS = process.env.SAFE_ADDRESS || '';       // where swept funds go (default: wallet addr)
 const DRY_RUN = process.env.DRY_RUN !== '0';               // default SAFE: don't broadcast
-const FEE = BigInt(process.env.FEE || 1_000_000);          // 0.001 ERG
+// Base/first-bid fee. Mempool replacement is STRICTLY greater weight (fee/byte), so a
+// tx at the exact 0.001 default TIES other default-fee bots and loses. Default just
+// above 0.001 to out-weight them on the FIRST attempt (no waiting for escalation).
+const FEE = BigInt(process.env.FEE || 1_100_000);          // 0.0011 ERG
 const BATCH_CAP = Number(process.env.BATCH_CAP || 20);     // max boxes examined per block
 const DUST_CHUNK = Number(process.env.DUST_CHUNK || 1);    // dust boxes per tx — 1 = solo (max win rate: one snipe never voids others)
 const MIN_MARGIN = BigInt(process.env.MIN_MARGIN || 2_000_000); // require net >= 0.002 ERG to broadcast
