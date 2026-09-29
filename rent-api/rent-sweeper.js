@@ -44,12 +44,13 @@ const SAFE_ADDRESS = process.env.SAFE_ADDRESS || '';       // where swept funds 
 const DRY_RUN = process.env.DRY_RUN !== '0';               // default SAFE: don't broadcast
 const FEE = BigInt(process.env.FEE || 1_000_000);          // 0.001 ERG
 const BATCH_CAP = Number(process.env.BATCH_CAP || 20);     // max boxes examined per block
-const DUST_CHUNK = Number(process.env.DUST_CHUNK || 4);    // dust boxes per tx — small so one sniped input doesn't void a big batch (1 = solo, max win rate)
+const DUST_CHUNK = Number(process.env.DUST_CHUNK || 1);    // dust boxes per tx — 1 = solo (max win rate: one snipe never voids others)
 const MIN_MARGIN = BigInt(process.env.MIN_MARGIN || 2_000_000); // require net >= 0.002 ERG to broadcast
 const MIN_BOX_TAKE = BigInt(process.env.MIN_BOX_TAKE || 0);// skip boxes worth less than this (0 = include all)
 const KEEP_TOKENS = process.env.KEEP_TOKENS !== '0';       // keep tokens/NFTs (default) vs burn junk
 const SWEEP_FUNDED = process.env.SWEEP_FUNDED === '1';     // also collect the ~fee from funded boxes (recreate them)
-const POLL_MS = Number(process.env.POLL_MS || 5_000);      // faster block detection
+const SWEEP_DUST = process.env.SWEEP_DUST !== '0';        // race for whole-take dust boxes (hyper-contested; set 0 to focus purely on funded)
+const POLL_MS = Number(process.env.POLL_MS || 1_500);      // fast block detection — act the instant a block lands
 const STATS_FILE = path.join(__dirname, 'sweeper-stats.json');
 const LOG_FILE = path.join(__dirname, 'sweeper-log.jsonl');
 const STORAGE_PERIOD = 1_051_200;
@@ -150,17 +151,19 @@ async function candidates(height) {
   catch { diag.apiReachable = false; return { dust: [], funded: [], diag }; }
   const rows = (d && d.rows) || [];
   diag.collectable = rows.length;
+  // skip our own pending, then check all UTXOs in PARALLEL (speed: no per-box lag)
+  const fresh = rows.filter(r => !(inFlight.has(r.boxId) && height - inFlight.get(r.boxId) < 3));
+  diag.inflight = rows.length - fresh.length;
+  const boxes = await Promise.all(fresh.map(r => getUtxo(r.boxId).catch(() => null)));
   const dust = [], funded = [];
-  for (const r of rows) {
+  for (const box of boxes) {
     if (dust.length + funded.length >= BATCH_CAP) break;
-    if (inFlight.has(r.boxId) && height - inFlight.get(r.boxId) < 3) { diag.inflight++; continue; } // our own pending
-    const box = await getUtxo(r.boxId);          // 404 => spent (mempool-aware)
-    if (!box) { diag.sniped++; continue; }
+    if (!box) { diag.sniped++; continue; }       // 404 => spent (mempool-aware)
     if (box.creationHeight != null && height - box.creationHeight < STORAGE_PERIOD) { diag.notEligible++; continue; }
-    if (wholeTakeable(box)) {                    // value <= fee: take the whole box
+    if (wholeTakeable(box)) {                     // value <= fee: take the whole box
       if (BigInt(box.value) < MIN_BOX_TAKE) { diag.tooSmall++; continue; }
       dust.push(box);
-    } else if (SWEEP_FUNDED) {                    // value > fee: recreate + collect the fee
+    } else if (SWEEP_FUNDED) {                     // value > fee: recreate + collect the fee
       funded.push(box);
     } else { diag.fundedSkipped++; }
   }
@@ -292,14 +295,17 @@ async function tick() {
       working = false; return;
     }
 
-    // Dust (whole-take): most contested. Split into small chunks so one sniped
-    // input only voids its own tx, not the whole set.
-    for (let i = 0; i < dust.length; i += DUST_CHUNK) {
-      const chunk = dust.slice(i, i + DUST_CHUNK);
-      const recoverable = chunk.reduce((a, b) => a + BigInt(b.value), 0n);
-      if (recoverable - FEE < MIN_MARGIN) continue;
-      try { await processBatch('dust', chunk, height, await buildSweep(chunk, height)); }
-      catch (e) { console.log(`[${height}] dust build skipped: ${e.message}`); }
+    // Dust (whole-take): most contested. Solo/small chunks, fired in PARALLEL so a
+    // snipe on one never blocks the others and we hit the mempool fast. (SWEEP_DUST=0 skips.)
+    if (SWEEP_DUST) {
+      const chunks = [];
+      for (let i = 0; i < dust.length; i += DUST_CHUNK) chunks.push(dust.slice(i, i + DUST_CHUNK));
+      await Promise.all(chunks.map(async chunk => {
+        const recoverable = chunk.reduce((a, b) => a + BigInt(b.value), 0n);
+        if (recoverable - FEE < MIN_MARGIN) return;
+        try { await processBatch('dust', chunk, height, await buildSweep(chunk, height)); }
+        catch (e) { console.log(`[${height}] dust build skipped: ${e.message}`); }
+      }));
     }
     // Funded batch (recreate + collect fee): less contested, steadier wins.
     if (funded.length) {
