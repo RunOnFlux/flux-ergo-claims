@@ -47,7 +47,8 @@ const BATCH_CAP = Number(process.env.BATCH_CAP || 20);     // boxes per tx (limi
 const MIN_MARGIN = BigInt(process.env.MIN_MARGIN || 2_000_000); // require net >= 0.002 ERG to broadcast
 const MIN_BOX_TAKE = BigInt(process.env.MIN_BOX_TAKE || 0);// skip boxes worth less than this (0 = include all)
 const KEEP_TOKENS = process.env.KEEP_TOKENS !== '0';       // keep tokens/NFTs (default) vs burn junk
-const POLL_MS = Number(process.env.POLL_MS || 20_000);
+const SWEEP_FUNDED = process.env.SWEEP_FUNDED === '1';     // also collect the ~fee from funded boxes (recreate them)
+const POLL_MS = Number(process.env.POLL_MS || 5_000);      // faster block detection
 const STATS_FILE = path.join(__dirname, 'sweeper-stats.json');
 const LOG_FILE = path.join(__dirname, 'sweeper-log.jsonl');
 const STORAGE_PERIOD = 1_051_200;
@@ -128,32 +129,36 @@ function boxBytesLen(boxJson) {
   const b = ergoLib.ErgoBox.from_json(JSON.stringify(boxJson));
   return b.sigma_serialize_bytes().length;
 }
-// whole-takeable iff value <= storageFeeFactor * boxBytes
-function wholeTakeable(boxJson) {
-  const fee = storageFeeFactor * BigInt(boxBytesLen(boxJson));
-  return BigInt(boxJson.value) <= fee;
-}
+// storage fee owed by a box (nanoERG) = bytes * storageFeeFactor
+function storageFee(boxJson) { return storageFeeFactor * BigInt(boxBytesLen(boxJson)); }
+// whole-takeable iff value <= its storage fee
+function wholeTakeable(boxJson) { return BigInt(boxJson.value) <= storageFee(boxJson); }
+// serialized SShort constant for a small non-negative index (zigzag: n -> 2n; single VLQ byte for n < 64)
+function sshortExt(i) { return '03' + ((2 * i) & 0xff).toString(16).padStart(2, '0'); }
 
 async function candidates(height) {
   // rent-api gives collectable boxes network-wide; re-verify each against the UTXO
-  // set (still unspent) and confirm whole-takeable via its real byte size.
-  const diag = { apiReachable: true, collectable: 0, sniped: 0, funded: 0, tooSmall: 0, notEligible: 0 };
+  // set (still unspent) and classify by whether it's whole-takeable or funded.
+  const diag = { apiReachable: true, collectable: 0, sniped: 0, fundedSkipped: 0, tooSmall: 0, notEligible: 0 };
   let d;
   try { d = await jget(`${RENT_API}/rent/boxes?status=collectable&limit=1000`); }
-  catch { diag.apiReachable = false; return { boxes: [], diag }; }
+  catch { diag.apiReachable = false; return { dust: [], funded: [], diag }; }
   const rows = (d && d.rows) || [];
   diag.collectable = rows.length;
-  const out = [];
+  const dust = [], funded = [];
   for (const r of rows) {
-    if (out.length >= BATCH_CAP) break;
+    if (dust.length + funded.length >= BATCH_CAP) break;
     const box = await getUtxo(r.boxId);          // 404 => already swept by someone
     if (!box) { diag.sniped++; continue; }
     if (box.creationHeight != null && height - box.creationHeight < STORAGE_PERIOD) { diag.notEligible++; continue; }
-    if (!wholeTakeable(box)) { diag.funded++; continue; } // funded box -> skip (needs recreation)
-    if (BigInt(box.value) < MIN_BOX_TAKE) { diag.tooSmall++; continue; }
-    out.push(box);
+    if (wholeTakeable(box)) {                    // value <= fee: take the whole box
+      if (BigInt(box.value) < MIN_BOX_TAKE) { diag.tooSmall++; continue; }
+      dust.push(box);
+    } else if (SWEEP_FUNDED) {                    // value > fee: recreate + collect the fee
+      funded.push(box);
+    } else { diag.fundedSkipped++; }
   }
-  return { boxes: out, diag };
+  return { dust, funded, diag };
 }
 
 // ==================== TX BUILD ====================
@@ -197,7 +202,69 @@ async function buildSweep(boxes, height) {
   };
 }
 
+// Funded boxes (value > fee): the protocol only lets us take the storage fee. We
+// RECREATE each box (same ergoTree, tokens, R4-R9 registers; value - fee; creation
+// height = now) at its own output index, point that input's ctx-var 127 at it, and
+// collect the freed fees (Σfee - minerFee) to destAddress. Tokens return to owners.
+async function buildFundedSweep(boxes, height) {
+  const recreations = [], inputs = [];
+  let totalFee = 0n;
+  for (const b of boxes) {
+    const fee = storageFee(b);
+    const keepVal = BigInt(b.value) - fee;            // recreated value (minimum allowed = value - fee)
+    if (keepVal < 1_000_000n) continue;               // recreation would fall below min box value — skip
+    const idx = recreations.length;                   // this box's recreation output index
+    recreations.push({
+      value: Number(keepVal), ergoTree: b.ergoTree, creationHeight: height,
+      assets: (b.assets || []).map(a => ({ tokenId: a.tokenId, amount: Number(a.amount) })),
+      additionalRegisters: b.additionalRegisters || {},
+    });
+    inputs.push({ boxId: b.boxId, spendingProof: { proofBytes: '', extension: { '127': sshortExt(idx) } } });
+    totalFee += fee;
+  }
+  if (!inputs.length) throw new Error('no funded boxes recreatable (all near fee boundary)');
+  const profit = totalFee - FEE;
+  if (profit < 1_000_000n) throw new Error(`funded batch profit ${Number(profit) / 1e9} ERG below min output`);
+  const outputs = [
+    ...recreations,                                                                                   // 0 .. N-1
+    { value: Number(profit), ergoTree: p2pkErgoTree(destAddress), creationHeight: height, assets: [], additionalRegisters: {} }, // N: our fee take
+    { value: Number(FEE), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },                     // N+1: miner fee
+  ];
+  return { finalTx: { inputs, dataInputs: [], outputs }, outValue: profit, feePaid: FEE, kept: 0, burned: 0, tokenBoxes: 0 };
+}
+
 // ==================== BLOCK LOOP ====================
+// Process one built batch: validate (dry-run) or submit (live), update stats.
+async function processBatch(kind, boxes, height, built) {
+  const { finalTx, outValue, feePaid, kept, burned, tokenBoxes } = built;
+  const rec = { kind, height, boxes: boxes.length, tokenBoxes, takeNano: outValue.toString(), feeNano: feePaid.toString(), kept, burned };
+  if (DRY_RUN) {
+    const chk = await checkTx(finalTx);   // full consensus validation, no broadcast
+    stats.dryRunChecks = (stats.dryRunChecks || 0) + 1;
+    stats.dryRunValid = (stats.dryRunValid || 0) + (chk.valid ? 1 : 0);
+    saveStats();
+    console.log(`[${height}] DRY-RUN ${kind} ${boxes.length} boxes, take ${Number(outValue) / 1e9} ERG — /check: ${chk.valid ? 'VALID ✓ ' + chk.detail : 'INVALID ✗ ' + chk.detail}`);
+    logLine({ mode: 'dry-run', check: chk.valid ? 'valid' : 'invalid', checkDetail: chk.detail, ...rec });
+  } else {
+    try {
+      const txId = await submitTx(finalTx);
+      stats.txsSubmitted++; stats.boxesSwept += boxes.length; stats.boxesTokenBearing += tokenBoxes;
+      stats.ergRecoveredNano += Number(outValue); stats.feesPaidNano += Number(feePaid);
+      stats.tokensKept += kept; stats.tokensBurned += burned;
+      stats[kind === 'funded' ? 'fundedWins' : 'dustWins'] = (stats[kind === 'funded' ? 'fundedWins' : 'dustWins'] || 0) + 1;
+      stats.lastTxId = txId; stats.lastSweepAt = new Date().toISOString();
+      saveStats(); logLine({ mode: 'live', txId, ...rec });
+      console.log(`[${height}] WON ${kind} ${boxes.length} boxes -> ${txId} (+${Number(outValue) / 1e9} ERG)`);
+    } catch (e) {
+      const lost = /already spent|double|missing/i.test(e.message);
+      if (lost) { stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1; }
+      else stats.txsFailed++;
+      saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
+      console.log(`[${height}] ${lost ? 'LOST race' : 'submit error'} (${kind}): ${e.message.split('\n')[0]}`);
+    }
+  }
+}
+
 let lastHeight = 0, working = false;
 async function tick() {
   if (working) return; working = true;
@@ -208,42 +275,28 @@ async function tick() {
     if (height === lastHeight) { working = false; return; }
     lastHeight = height;
 
-    const { boxes, diag } = await candidates(height);
-    if (!boxes.length) {
-      if (!diag.apiReachable) console.log(`[${height}] rent-api UNREACHABLE at ${RENT_API} — is it running on this host? (set RENT_API_URL)`);
-      else console.log(`[${height}] nothing to sweep · collectable ${diag.collectable} → funded ${diag.funded}, already-spent ${diag.sniped}, below-min ${diag.tooSmall}, not-yet-eligible ${diag.notEligible}`);
+    const { dust, funded, diag } = await candidates(height);
+    if (!dust.length && !funded.length) {
+      if (!diag.apiReachable) console.log(`[${height}] rent-api UNREACHABLE at ${RENT_API} — running on this host? (set RENT_API_URL)`);
+      else console.log(`[${height}] nothing · collectable ${diag.collectable} → funded-skipped ${diag.fundedSkipped}, spent ${diag.sniped}, below-min ${diag.tooSmall}, not-eligible ${diag.notEligible}`);
       working = false; return;
     }
 
-    const recoverable = boxes.reduce((a, b) => a + BigInt(b.value), 0n);
-    if (recoverable - FEE < MIN_MARGIN) { console.log(`[${height}] ${boxes.length} boxes but net < margin`); working = false; return; }
-
-    const { finalTx, outValue, feePaid, kept, burned, tokenBoxes } = await buildSweep(boxes, height);
-
-    const rec = { height, boxes: boxes.length, tokenBoxes, recoverableNano: recoverable.toString(), feeNano: feePaid.toString(), kept, burned };
-    if (DRY_RUN) {
-      // Ask the node to fully validate the assembled tx (no broadcast). This is the
-      // end-to-end correctness check: valid=true means it WOULD be accepted on-chain.
-      const chk = await checkTx(finalTx);
-      stats.dryRunChecks = (stats.dryRunChecks || 0) + 1;
-      stats.dryRunValid = (stats.dryRunValid || 0) + (chk.valid ? 1 : 0);
-      saveStats();
-      console.log(`[${height}] DRY-RUN ${boxes.length} boxes, recover ${Number(recoverable) / 1e9} ERG — node /check: ${chk.valid ? 'VALID ✓ ' + chk.detail : 'INVALID ✗ ' + chk.detail}`);
-      logLine({ mode: 'dry-run', check: chk.valid ? 'valid' : 'invalid', checkDetail: chk.detail, ...rec });
-    } else {
-      try {
-        const txId = await submitTx(finalTx);
-        stats.txsSubmitted++; stats.boxesSwept += boxes.length; stats.boxesTokenBearing += tokenBoxes;
-        stats.ergRecoveredNano += Number(recoverable); stats.feesPaidNano += Number(feePaid);
-        stats.tokensKept += kept; stats.tokensBurned += burned; stats.lastTxId = txId; stats.lastSweepAt = new Date().toISOString();
-        saveStats(); logLine({ mode: 'live', txId, ...rec });
-        console.log(`[${height}] swept ${boxes.length} boxes -> ${txId} (+${Number(recoverable) / 1e9} ERG)`);
-      } catch (e) {
-        const invalid = /already spent|double|missing/i.test(e.message);
-        if (invalid) stats.txsInvalidated++; else stats.txsFailed++;
-        saveStats(); logLine({ mode: 'error', height, error: e.message });
-        console.log(`[${height}] submit failed (${invalid ? 'sniped/invalid' : 'error'}): ${e.message}`);
+    // Dust batch (whole-take): most contested, but highest reward per box.
+    if (dust.length) {
+      const recoverable = dust.reduce((a, b) => a + BigInt(b.value), 0n);
+      if (recoverable - FEE >= MIN_MARGIN) {
+        try { await processBatch('dust', dust, height, await buildSweep(dust, height)); }
+        catch (e) { console.log(`[${height}] dust build skipped: ${e.message}`); }
       }
+    }
+    // Funded batch (recreate + collect fee): less contested, steadier wins.
+    if (funded.length) {
+      try {
+        const built = await buildFundedSweep(funded, height);
+        if (built.outValue >= MIN_MARGIN) await processBatch('funded', funded, height, built);
+        else console.log(`[${height}] funded net ${Number(built.outValue) / 1e9} < margin`);
+      } catch (e) { console.log(`[${height}] funded build skipped: ${e.message}`); }
     }
   } catch (e) { console.error('tick error:', e.message); }
   finally { working = false; }
