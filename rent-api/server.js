@@ -206,6 +206,59 @@ async function incrementalScan() {
   } finally { scanning = false; }
 }
 
+// ==================== FEE-WAR EVIDENCE ====================
+// Scan the mempool for storage-rent collection txs and surface the bidding wars:
+// how much of dormant-box value is being handed to miners as fees, live.
+const FEE_TREE_PREFIX = '1005040004000e36';
+let feeWar = { generatedAt: null, mempoolTxs: 0, rentCollectionTxs: 0, contestedBoxes: 0, totalFeeToMinersNano: 0, maxFeeNano: 0, wars: [] };
+
+async function fetchMempoolAll() {
+  const out = [];
+  for (let off = 0; off < 5000; off += 100) {
+    const arr = await nodeGet(`/transactions/unconfirmed?limit=100&offset=${off}`).catch(() => null);
+    if (!arr || !arr.length) break;
+    out.push(...arr);
+    if (arr.length < 100) break;
+  }
+  return out;
+}
+const emptyProof = (i) => { const p = (i.spendingProof || {}).proofBytes; return p == null || p === ''; };
+
+async function refreshFeeWar() {
+  try {
+    const mp = await fetchMempoolAll();
+    // a storage-rent collection tx has at least one input spent with an EMPTY proof
+    const rent = mp.filter(t => (t.inputs || []).some(emptyProof));
+    const byBox = new Map();
+    let feeToMiners = 0, maxFee = 0;
+    for (const t of rent) {
+      const fee = (t.outputs || []).filter(o => (o.ergoTree || '').startsWith(FEE_TREE_PREFIX)).reduce((a, o) => a + Number(o.value), 0);
+      feeToMiners += fee; if (fee > maxFee) maxFee = fee;
+      const weight = fee / (t.size || 1);
+      for (const i of (t.inputs || [])) if (emptyProof(i)) {
+        if (!byBox.has(i.boxId)) byBox.set(i.boxId, []);
+        byBox.get(i.boxId).push({ txId: t.id, fee, size: t.size, weight });
+      }
+    }
+    const wars = [];
+    for (const [boxId, txs] of byBox) {
+      if (txs.length < 2) continue;                 // contested = ≥2 competing txs
+      txs.sort((a, b) => b.weight - a.weight);
+      wars.push({ boxId, bidders: txs.length, topFeeNano: txs[0].fee, topWeight: Math.round(txs[0].weight) });
+    }
+    wars.sort((a, b) => b.topFeeNano - a.topFeeNano);
+    feeWar = {
+      generatedAt: new Date().toISOString(),
+      mempoolTxs: mp.length,
+      rentCollectionTxs: rent.length,
+      contestedBoxes: wars.length,
+      totalFeeToMinersNano: feeToMiners,
+      maxFeeNano: maxFee,
+      wars: wars.slice(0, 40),
+    };
+  } catch (e) { console.error('[feewar] refresh failed:', e.message); }
+}
+
 // ==================== HTTP ====================
 function send(res, code, obj, contentType = 'application/json') {
   const body = typeof obj === 'string' ? obj : JSON.stringify(obj);
@@ -239,6 +292,9 @@ const server = http.createServer((req, res) => {
       return send(res, 200, { status: 'success', count: rows.length, rows });
     } catch { return send(res, 200, { status: 'success', count: 0, rows: [] }); }
   }
+  // Live fee-war evidence — independent of the box scan, always available.
+  if (p === '/rent/feewar') return send(res, 200, feeWar);
+
   if (!state.ready) return send(res, 503, { status: 'error', data: { code: 503, name: 'warming-up', message: 'first scan in progress' } });
 
   const summary = {
@@ -274,6 +330,7 @@ const server = http.createServer((req, res) => {
 (async () => {
   console.log(`rent-api starting · node ${NODE_URL} · lookahead ${LOOKAHEAD_DAYS}d · CORS ${ALLOW_ORIGIN}`);
   server.listen(PORT, () => console.log(`listening on :${PORT} (serving /health while first scan runs)`));
+  refreshFeeWar(); setInterval(refreshFeeWar, 30_000); // fee-war evidence, independent of the box scan
   try {
     await fullScan();
   } catch (e) {

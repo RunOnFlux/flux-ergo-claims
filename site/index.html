@@ -156,6 +156,10 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
     <button class="go" style="margin-top:0;flex:1;min-width:140px" onclick="loadWatch()">Refresh</button>
   </div>
   <div id="watch-stats"></div>
+  <div id="feewar-panel" style="display:none;margin:1rem 0;padding:1rem;border-radius:12px;background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.25)">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--crit);margin-bottom:.6rem">🔥 Live fee war — value flowing to miners</div>
+    <div id="feewar-stats"></div>
+  </div>
   <div id="sweeper-panel" style="display:none;margin:1rem 0;padding:1rem;border-radius:12px;background:var(--card2);border:1px solid var(--border)">
     <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--subtle);margin-bottom:.6rem">🤝 Community Sweeper — transparency</div>
     <div id="sweeper-stats"></div>
@@ -463,7 +467,24 @@ out.innerHTML=`<div class="verdict v-warn">⚠ ${due.length.toLocaleString()} ${
 // ---- RENT WATCH: live feed from the Flux-operated Ergo node (rent-api) ----
 const RENT_API='https://api.ergo.runonflux.com';
 let watchLoaded=false,watchTimer=null;
-function onWatchOpen(){if(!watchLoaded){loadWatch();loadSweeperStats();}if(!watchTimer)watchTimer=setInterval(()=>{if(document.getElementById('tab-watch').style.display!=='none'){loadWatch();loadSweeperStats();}},60000);}
+function onWatchOpen(){if(!watchLoaded){loadWatch();loadSweeperStats();loadFeeWar();}if(!watchTimer)watchTimer=setInterval(()=>{if(document.getElementById('tab-watch').style.display!=='none'){loadWatch();loadSweeperStats();loadFeeWar();}},60000);}
+function loadFeeWar(){fetch(RENT_API+'/rent/feewar',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+  const panel=document.getElementById('feewar-panel'),out=document.getElementById('feewar-stats');
+  if(!d||d.generatedAt===null||d.rentCollectionTxs===undefined){panel.style.display='none';return;}
+  panel.style.display='block';
+  const erg=n=>(Number(n||0)/1e9).toLocaleString(undefined,{maximumFractionDigits:3});
+  const pct=d.mempoolTxs?Math.round(100*d.rentCollectionTxs/d.mempoolTxs):0;
+  out.innerHTML=`<div class="stats-grid">
+    <div class="stat"><div class="num" style="color:var(--crit)">${pct}%</div><div class="lbl">of mempool is rent-harvesting</div></div>
+    <div class="stat"><div class="num">${(d.rentCollectionTxs||0).toLocaleString()}</div><div class="lbl">harvest txs in mempool</div></div>
+    <div class="stat"><div class="num" style="color:var(--crit)">${erg(d.totalFeeToMinersNano)}</div><div class="lbl">ERG to miners (pending)</div></div>
+    <div class="stat"><div class="num">${erg(d.maxFeeNano)}</div><div class="lbl">top single bid</div></div>
+  </div>`;
+  if(d.wars&&d.wars.length){let h='<table><tr><th>contested box</th><th>bidders</th><th>top fee paid to miner</th></tr>';
+    d.wars.slice(0,10).forEach(w=>{h+=`<tr><td><a href="https://ergexplorer.com/boxes/${w.boxId}" target="_blank">${w.boxId.slice(0,12)}…</a></td><td>${w.bidders}</td><td class="crit">${erg(w.topFeeNano)} ERG</td></tr>`});
+    out.innerHTML+=h+'</table>';}
+  out.innerHTML+=`<div class="tiny" style="margin-top:.6rem">Storage-rent collectors bid the miner fee up to <b>~90% of a dormant box's value</b> to win it. Miners who self-harvest pay this fee <b>to themselves</b> — so they win at zero cost, and independent actors cannot compete. Live from a Flux Ergo node · updated ${d.generatedAt?new Date(d.generatedAt).toISOString().slice(11,16):'—'} UTC.</div>`;
+}).catch(()=>{document.getElementById('feewar-panel').style.display='none';});}
 function loadSweeperStats(){fetch(RENT_API+'/sweeper/stats',{cache:'no-store'}).then(r=>r.json()).then(s=>{
   const panel=document.getElementById('sweeper-panel'),out=document.getElementById('sweeper-stats');
   if(!s||s.running===false||s.txsSubmitted===undefined){panel.style.display='none';return;}
