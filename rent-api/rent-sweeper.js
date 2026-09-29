@@ -50,6 +50,12 @@ const MIN_BOX_TAKE = BigInt(process.env.MIN_BOX_TAKE || 0);// skip boxes worth l
 const KEEP_TOKENS = process.env.KEEP_TOKENS !== '0';       // keep tokens/NFTs (default) vs burn junk
 const SWEEP_FUNDED = process.env.SWEEP_FUNDED === '1';     // also collect the ~fee from funded boxes (recreate them)
 const SWEEP_DUST = process.env.SWEEP_DUST !== '0';        // race for whole-take dust boxes (hyper-contested; set 0 to focus purely on funded)
+// Ergo mempool does fee-based replacement: your tx replaces a conflicting one if its
+// fee/byte weight is higher. So on a lost box we escalate its fee (capped at a fraction
+// of the box's value, so a win is always profitable).
+const BID_ESCALATE = Number(process.env.BID_ESCALATE || 1.6);        // fee multiplier per loss
+const BID_MAX_FRACTION = Number(process.env.BID_MAX_FRACTION || 0.4); // never bid more than this share of box value
+const bidFee = new Map(); // boxId -> current fee (nanoERG, BigInt)
 const POLL_MS = Number(process.env.POLL_MS || 1_500);      // fast block detection — act the instant a block lands
 const STATS_FILE = path.join(__dirname, 'sweeper-stats.json');
 const LOG_FILE = path.join(__dirname, 'sweeper-log.jsonl');
@@ -185,9 +191,19 @@ function p2pkErgoTree(addrB58) {
   return '0008cd' + Buffer.from(a.content_bytes()).toString('hex'); // P2PK: 0008cd + 33-byte pubkey
 }
 
-async function buildSweep(boxes, height) {
+// current bid fee for a box (escalates each time we lose it), and the escalation on loss
+const getBid = (box) => bidFee.get(box.boxId) || FEE;
+function escalateBid(box) {
+  const cur = getBid(box);
+  const cap = BigInt(Math.floor(Number(box.value) * BID_MAX_FRACTION)); // never bid past this share of value
+  let next = BigInt(Math.floor(Number(cur) * BID_ESCALATE));
+  if (next > cap) next = cap;
+  if (next > cur) bidFee.set(box.boxId, next); // else already at cap — competitor values it more than we can pay
+}
+
+async function buildSweep(boxes, height, fee = FEE) {
   const totalIn = boxes.reduce((a, b) => a + BigInt(b.value), 0n);
-  const outValue = totalIn - FEE;
+  const outValue = totalIn - fee;
   if (outValue < 1_000_000n) throw new Error(`batch self-funds too little (${Number(totalIn) / 1e9} ERG <= fee+min); need more boxes`);
 
   // aggregate tokens; keep them all (default) or drop = burn (consensus allows it)
@@ -198,13 +214,13 @@ async function buildSweep(boxes, height) {
 
   const outputs = [
     { value: Number(outValue), ergoTree: p2pkErgoTree(destAddress), creationHeight: height, assets, additionalRegisters: {} },
-    { value: Number(FEE), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },
+    { value: Number(fee), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },
   ];
   const inputs = boxes.map(b => ({ boxId: b.boxId, spendingProof: { proofBytes: '', extension: { '127': EXT_OUTPUT0 } } }));
 
   const finalTx = { inputs, dataInputs: [], outputs };
   return {
-    finalTx, outValue, feePaid: FEE,
+    finalTx, outValue, feePaid: fee,
     kept: KEEP_TOKENS ? tokMap.size : 0,
     burned: KEEP_TOKENS ? 0 : tokMap.size,
     tokenBoxes: boxes.filter(b => (b.assets || []).length).length,
@@ -259,7 +275,7 @@ async function processBatch(kind, boxes, height, built) {
   } else {
     try {
       const txId = await submitTx(finalTx);
-      for (const b of boxes) inFlight.set(b.boxId, height); // don't re-target until confirmed/dropped
+      for (const b of boxes) { inFlight.set(b.boxId, height); bidFee.delete(b.boxId); } // won: stop tracking/bidding it
       stats.txsSubmitted++; stats.boxesSwept += boxes.length; stats.boxesTokenBearing += tokenBoxes;
       stats.ergRecoveredNano += Number(outValue); stats.feesPaidNano += Number(feePaid);
       stats.tokensKept += kept; stats.tokensBurned += burned;
@@ -269,8 +285,10 @@ async function processBatch(kind, boxes, height, built) {
       console.log(`[${height}] WON ${kind} ${boxes.length} boxes -> ${txId} (+${Number(outValue) / 1e9} ERG)`);
     } catch (e) {
       const lost = /already spent|double|missing/i.test(e.message);
-      if (lost) { stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1; }
-      else stats.txsFailed++;
+      if (lost) {
+        stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1;
+        if (kind === 'dust') for (const b of boxes) escalateBid(b); // out-bid the winner next block
+      } else stats.txsFailed++;
       saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
       console.log(`[${height}] ${lost ? 'LOST race' : 'submit error'} (${kind}): ${e.message.replace(/\s+/g, ' ').slice(0, 400)}`);
     }
@@ -302,8 +320,9 @@ async function tick() {
       for (let i = 0; i < dust.length; i += DUST_CHUNK) chunks.push(dust.slice(i, i + DUST_CHUNK));
       await Promise.all(chunks.map(async chunk => {
         const recoverable = chunk.reduce((a, b) => a + BigInt(b.value), 0n);
-        if (recoverable - FEE < MIN_MARGIN) return;
-        try { await processBatch('dust', chunk, height, await buildSweep(chunk, height)); }
+        const fee = chunk.reduce((m, b) => { const f = getBid(b); return f > m ? f : m; }, FEE); // bid up to beat rivals
+        if (recoverable - fee < MIN_MARGIN) return; // still profitable at this bid?
+        try { await processBatch('dust', chunk, height, await buildSweep(chunk, height, fee)); }
         catch (e) { console.log(`[${height}] dust build skipped: ${e.message}`); }
       }));
     }
