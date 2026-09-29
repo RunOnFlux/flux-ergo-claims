@@ -43,7 +43,8 @@ const PRIVKEY = (process.env.SWEEP_PRIVATE_KEY || '').trim().replace(/^0x/, '');
 const SAFE_ADDRESS = process.env.SAFE_ADDRESS || '';       // where swept funds go (default: wallet addr)
 const DRY_RUN = process.env.DRY_RUN !== '0';               // default SAFE: don't broadcast
 const FEE = BigInt(process.env.FEE || 1_000_000);          // 0.001 ERG
-const BATCH_CAP = Number(process.env.BATCH_CAP || 20);     // boxes per tx (limit snipe blast radius)
+const BATCH_CAP = Number(process.env.BATCH_CAP || 20);     // max boxes examined per block
+const DUST_CHUNK = Number(process.env.DUST_CHUNK || 4);    // dust boxes per tx — small so one sniped input doesn't void a big batch (1 = solo, max win rate)
 const MIN_MARGIN = BigInt(process.env.MIN_MARGIN || 2_000_000); // require net >= 0.002 ERG to broadcast
 const MIN_BOX_TAKE = BigInt(process.env.MIN_BOX_TAKE || 0);// skip boxes worth less than this (0 = include all)
 const KEEP_TOKENS = process.env.KEEP_TOKENS !== '0';       // keep tokens/NFTs (default) vs burn junk
@@ -63,7 +64,9 @@ async function jget(url, { allow404 = false } = {}) {
   return r.json();
 }
 const getInfo = () => jget(`${NODE_URL}/info`);
-const getUtxo = (boxId) => jget(`${NODE_URL}/utxo/byId/${boxId}`, { allow404: true });
+// mempool-aware: excludes boxes already spent in the mempool (by us OR competitors),
+// so we don't re-submit our own pending inputs or race an already-pending spend.
+const getUtxo = (boxId) => jget(`${NODE_URL}/utxo/withPool/byId/${boxId}`, { allow404: true });
 async function submitTx(txJson) {
   const r = await fetch(`${NODE_URL}/transactions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txJson),
@@ -136,10 +139,12 @@ function wholeTakeable(boxJson) { return BigInt(boxJson.value) <= storageFee(box
 // serialized SShort constant for a small non-negative index (zigzag: n -> 2n; single VLQ byte for n < 64)
 function sshortExt(i) { return '03' + ((2 * i) & 0xff).toString(16).padStart(2, '0'); }
 
+const inFlight = new Map(); // boxId -> height we submitted it; avoids re-targeting our own pending inputs
+
 async function candidates(height) {
   // rent-api gives collectable boxes network-wide; re-verify each against the UTXO
   // set (still unspent) and classify by whether it's whole-takeable or funded.
-  const diag = { apiReachable: true, collectable: 0, sniped: 0, fundedSkipped: 0, tooSmall: 0, notEligible: 0 };
+  const diag = { apiReachable: true, collectable: 0, sniped: 0, fundedSkipped: 0, tooSmall: 0, notEligible: 0, inflight: 0 };
   let d;
   try { d = await jget(`${RENT_API}/rent/boxes?status=collectable&limit=1000`); }
   catch { diag.apiReachable = false; return { dust: [], funded: [], diag }; }
@@ -148,7 +153,8 @@ async function candidates(height) {
   const dust = [], funded = [];
   for (const r of rows) {
     if (dust.length + funded.length >= BATCH_CAP) break;
-    const box = await getUtxo(r.boxId);          // 404 => already swept by someone
+    if (inFlight.has(r.boxId) && height - inFlight.get(r.boxId) < 3) { diag.inflight++; continue; } // our own pending
+    const box = await getUtxo(r.boxId);          // 404 => spent (mempool-aware)
     if (!box) { diag.sniped++; continue; }
     if (box.creationHeight != null && height - box.creationHeight < STORAGE_PERIOD) { diag.notEligible++; continue; }
     if (wholeTakeable(box)) {                    // value <= fee: take the whole box
@@ -248,6 +254,7 @@ async function processBatch(kind, boxes, height, built) {
   } else {
     try {
       const txId = await submitTx(finalTx);
+      for (const b of boxes) inFlight.set(b.boxId, height); // don't re-target until confirmed/dropped
       stats.txsSubmitted++; stats.boxesSwept += boxes.length; stats.boxesTokenBearing += tokenBoxes;
       stats.ergRecoveredNano += Number(outValue); stats.feesPaidNano += Number(feePaid);
       stats.tokensKept += kept; stats.tokensBurned += burned;
@@ -274,21 +281,23 @@ async function tick() {
     if (info.parameters && info.parameters.storageFeeFactor) storageFeeFactor = BigInt(info.parameters.storageFeeFactor);
     if (height === lastHeight) { working = false; return; }
     lastHeight = height;
+    for (const [id, h] of inFlight) if (height - h >= 3) inFlight.delete(id); // prune confirmed/dropped
 
     const { dust, funded, diag } = await candidates(height);
     if (!dust.length && !funded.length) {
       if (!diag.apiReachable) console.log(`[${height}] rent-api UNREACHABLE at ${RENT_API} — running on this host? (set RENT_API_URL)`);
-      else console.log(`[${height}] nothing · collectable ${diag.collectable} → funded-skipped ${diag.fundedSkipped}, spent ${diag.sniped}, below-min ${diag.tooSmall}, not-eligible ${diag.notEligible}`);
+      else console.log(`[${height}] nothing · collectable ${diag.collectable} → funded-skipped ${diag.fundedSkipped}, spent ${diag.sniped}, in-flight ${diag.inflight}, below-min ${diag.tooSmall}, not-eligible ${diag.notEligible}`);
       working = false; return;
     }
 
-    // Dust batch (whole-take): most contested, but highest reward per box.
-    if (dust.length) {
-      const recoverable = dust.reduce((a, b) => a + BigInt(b.value), 0n);
-      if (recoverable - FEE >= MIN_MARGIN) {
-        try { await processBatch('dust', dust, height, await buildSweep(dust, height)); }
-        catch (e) { console.log(`[${height}] dust build skipped: ${e.message}`); }
-      }
+    // Dust (whole-take): most contested. Split into small chunks so one sniped
+    // input only voids its own tx, not the whole set.
+    for (let i = 0; i < dust.length; i += DUST_CHUNK) {
+      const chunk = dust.slice(i, i + DUST_CHUNK);
+      const recoverable = chunk.reduce((a, b) => a + BigInt(b.value), 0n);
+      if (recoverable - FEE < MIN_MARGIN) continue;
+      try { await processBatch('dust', chunk, height, await buildSweep(chunk, height)); }
+      catch (e) { console.log(`[${height}] dust build skipped: ${e.message}`); }
     }
     // Funded batch (recreate + collect fee): less contested, steadier wins.
     if (funded.length) {
