@@ -61,6 +61,43 @@ const BID_MAX_FRACTION = Number(process.env.BID_MAX_FRACTION || 0.4); // never b
 const bidFee = new Map(); // boxId -> current fee (nanoERG, BigInt)
 const pending = new Map(); // txId -> submitted-but-unconfirmed sweep, credited only once mined
 const VERBOSE = process.env.VERBOSE !== '0'; // per-box logs: competitor fee, our bid, win/lose reason
+
+// ---- valuable-token targeting: allowlist of liquid tokens (tokenId -> decimals) ----
+// These have real DEX markets, so a dust box holding them is worth far more than its ERG.
+const TOKEN_DEC = {
+  '03faf2cb329f2e90d6d23b58d91bbb6c046aa143261cc21f52fbe2824bfcbf04': 2, // SigUSD (stablecoin, most liquid)
+  '8b08cdd5449a9592a9e79711d7d79249d7a03c535d17efaee83e216e80a44c4b': 3, // RSN (Rosen bridge)
+  '472c3d4ecaa08fb7392ff041ee2e6af75f4a558810a74b28600549d5392810e8': 6, // NETA (micro-cap — value optimistic)
+  'd71693c49a84fbbecd4908c94813b46514b18b67a99952dc1e6e4791556de413': 2, // ergopad
+  '0cd8c9f416e5b1ca9f986a7f10a84191dfb85941619e49e53c0dc30ebf83324b': 0, // COMET
+};
+const TOKEN_HAIRCUT = Number(process.env.TOKEN_HAIRCUT || 0.5); // discount vs DEX quote (slippage/liquidity)
+const MIN_TOKEN_VALUE = BigInt(process.env.MIN_TOKEN_VALUE || 500_000_000); // only fund-bid boxes worth >0.5 ERG in tokens
+let ergPerToken = {}; // tokenId -> ERG per DISPLAY unit (from Spectrum)
+
+async function refreshTokenPrices() {
+  try {
+    const r = await fetch('https://api.spectrum.fi/v1/price-tracking/markets', { headers: { 'User-Agent': 'rent-sweeper/1.0' } });
+    const mk = await r.json();
+    const E = '0000000000000000000000000000000000000000000000000000000000000000';
+    const p = {};
+    for (const m of mk) {
+      const lp = m.lastPrice; if (!lp) continue;
+      if (m.baseId === E && TOKEN_DEC[m.quoteId] != null) p[m.quoteId] = 1 / lp;   // token per ERG -> ERG per token
+      if (m.quoteId === E && TOKEN_DEC[m.baseId] != null) p[m.baseId] = lp;
+    }
+    ergPerToken = p;
+  } catch (e) { if (VERBOSE) console.log('  [prices] refresh failed:', e.message); }
+}
+// ERG-equivalent (nanoERG, haircut) of allowlisted tokens in a box
+function tokenValueNano(box) {
+  let v = 0;
+  for (const t of (box.assets || [])) {
+    const dec = TOKEN_DEC[t.tokenId], price = ergPerToken[t.tokenId];
+    if (dec != null && price) v += (Number(t.amount) / 10 ** dec) * price * TOKEN_HAIRCUT;
+  }
+  return BigInt(Math.floor(v * 1e9));
+}
 const POLL_MS = Number(process.env.POLL_MS || 1_500);      // fast block detection — act the instant a block lands
 const STATS_FILE = path.join(__dirname, 'sweeper-stats.json');
 const LOG_FILE = path.join(__dirname, 'sweeper-log.jsonl');
@@ -323,6 +360,51 @@ async function buildFundedSweep(boxes, height, minerFee = FEE) {
   return { finalTx: { inputs, dataInputs: [], outputs }, outValue: profit, feePaid: minerFee, kept: 0, burned: 0, tokenBoxes: 0, totalFee };
 }
 
+// ---- funded whole-take of a VALUABLE-TOKEN dust box ----
+// The box has ~0 native ERG so it can't pay its own fee; we add a wallet box to fund the
+// fee and keep the tokens. Rent input = empty proof + ctx-var 127; funding input is signed
+// by the wallet via ergo-lib. (New signing path — validate with DRY_RUN /check before live.)
+function buildStateCtx(headers) {
+  const bh = ergoLib.BlockHeaders.from_json(headers);
+  const pre = ergoLib.PreHeader.from_block_header(bh.get(0));
+  return new ergoLib.ErgoStateContext(pre, bh, ergoLib.Parameters.default_parameters());
+}
+async function getFundingBox(minValue) {
+  try {
+    const r = await fetch(`${NODE_URL}/blockchain/box/unspent/byAddress?limit=20&sortDirection=desc`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'rent-sweeper/1.0' }, body: JSON.stringify(myAddress),
+    });
+    if (r.ok) { const j = await r.json(); const items = j.items || j || []; return items.find(b => BigInt(b.value) >= minValue) || null; }
+  } catch {}
+  return null;
+}
+async function buildFundedDust(box, height, fee) {
+  const funding = await getFundingBox(fee + 2_000_000n); // enough to cover fee + a change box
+  if (!funding) throw new Error('no wallet funding box (fund the wallet / enable node extra index)');
+  const inBoxes = [box, funding];
+  const outValue = BigInt(box.value) + BigInt(funding.value) - fee;
+  if (outValue < 1_000_000n) throw new Error('funded-dust output below min');
+  const tokMap = new Map();
+  for (const b of inBoxes) for (const a of (b.assets || [])) tokMap.set(a.tokenId, (tokMap.get(a.tokenId) || 0n) + BigInt(a.amount));
+  const assets = [...tokMap].map(([tokenId, amount]) => ({ tokenId, amount: Number(amount) }));
+  const outputs = [
+    { value: Number(outValue), ergoTree: p2pkErgoTree(destAddress), creationHeight: height, assets, additionalRegisters: {} },
+    { value: Number(fee), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },
+  ];
+  const unsignedJson = {
+    inputs: [{ boxId: box.boxId, extension: { '127': EXT_OUTPUT0 } }, { boxId: funding.boxId, extension: {} }],
+    dataInputs: [], outputs,
+  };
+  const unsigned = ergoLib.UnsignedTransaction.from_json(JSON.stringify(unsignedJson));
+  const boxesToSpend = ergoLib.ErgoBoxes.from_boxes_json(inBoxes);
+  const dataBoxes = ergoLib.ErgoBoxes.empty();
+  const stateCtx = buildStateCtx(await jget(`${NODE_URL}/blocks/lastHeaders/10`));
+  const signed = wallet.sign_transaction(stateCtx, unsigned, boxesToSpend, dataBoxes); // signs funding, empty-proofs rent
+  const finalTx = JSON.parse(signed.to_json());
+  const net = BigInt(box.value) + tokenValueNano(box) - fee; // funding ERG returns to us; token value is the gain
+  return { finalTx, outValue: net, feePaid: fee, kept: tokMap.size, burned: 0, tokenBoxes: 1 };
+}
+
 // ==================== BLOCK LOOP ====================
 // Process one built batch: validate (dry-run) or submit (live), update stats.
 async function processBatch(kind, boxes, height, built) {
@@ -349,7 +431,7 @@ async function processBatch(kind, boxes, height, built) {
       const lost = /already spent|double|missing/i.test(e.message);
       if (lost) {
         stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1;
-        for (const b of boxes) escalateBid(b, kind === 'funded' ? storageFee(b) : BigInt(b.value)); // out-bid next block
+        for (const b of boxes) escalateBid(b, kind === 'funded' ? storageFee(b) : (kind === 'token' ? BigInt(b.value) + tokenValueNano(b) : BigInt(b.value))); // out-bid next block
       } else stats.txsFailed++;
       const reason = e.message.replace(/\s+/g, ' ').replace(/^submit \d+: /, '').slice(0, 160);
       saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
@@ -371,7 +453,7 @@ async function confirmPending(height) {
       stats.boxesSwept++; stats.boxesTokenBearing += p.tokenBoxes;
       stats.ergRecoveredNano += p.outValue; stats.feesPaidNano += p.feePaid;
       stats.tokensKept += p.kept; stats.tokensBurned += p.burned;
-      stats[p.kind === 'funded' ? 'fundedWins' : 'dustWins'] = (stats[p.kind === 'funded' ? 'fundedWins' : 'dustWins'] || 0) + 1;
+      stats[p.kind + 'Wins'] = (stats[p.kind + 'Wins'] || 0) + 1;
       stats.lastSweepAt = new Date().toISOString();
       saveStats(); logLine({ mode: 'confirmed', txId, boxId: p.boxId, kind: p.kind, netNano: p.outValue });
       console.log(`[${height}] ✅ CONFIRMED ${tag} +${net} ERG (fee ${fee}) -> ${txId.slice(0, 12)}…`);
@@ -431,7 +513,16 @@ async function tick() {
     };
 
     const jobs = [];
-    if (SWEEP_DUST) for (const box of dust) jobs.push(attempt('dust', box, BigInt(box.value), fee => buildSweep([box], height, fee)));
+    if (SWEEP_DUST) for (const box of dust) {
+      const tv = tokenValueNano(box);
+      if (tv >= MIN_TOKEN_VALUE) {
+        // valuable-token dust box (e.g. SigUSD/NETA): fund the fee from our wallet, keep the tokens.
+        jobs.push(attempt('token', box, BigInt(box.value) + tv, fee => buildFundedDust(box, height, fee)));
+      } else if (BigInt(box.value) > FEE + 1_100_000n) {
+        // plain dust with enough native ERG to self-fund
+        jobs.push(attempt('dust', box, BigInt(box.value), fee => buildSweep([box], height, fee)));
+      }
+    }
     for (const box of funded) jobs.push(attempt('funded', box, storageFee(box), fee => buildFundedSweep([box], height, fee)));
     await Promise.all(jobs);
   } catch (e) { console.error('tick error:', e.message); }
@@ -440,7 +531,8 @@ async function tick() {
 
 // ==================== BOOT ====================
 console.log(`rent-sweeper ${DRY_RUN ? '[DRY-RUN]' : '[LIVE]'} node ${NODE_URL} · dest ${destAddress}`);
-console.log(`batch<=${BATCH_CAP} · keepTokens=${KEEP_TOKENS} · minMargin=${Number(MIN_MARGIN) / 1e9} ERG`);
+console.log(`batch<=${BATCH_CAP} · keepTokens=${KEEP_TOKENS} · minMargin=${Number(MIN_MARGIN) / 1e9} ERG · token targeting: SigUSD/RSN/NETA/ergopad/COMET (haircut ${TOKEN_HAIRCUT})`);
 saveStats();
+refreshTokenPrices(); setInterval(refreshTokenPrices, 300_000); // DEX prices for valuable-token targeting
 tick();
 setInterval(tick, POLL_MS);
