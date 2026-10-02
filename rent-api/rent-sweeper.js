@@ -73,6 +73,7 @@ const TOKEN_DEC = {
 };
 const TOKEN_HAIRCUT = Number(process.env.TOKEN_HAIRCUT || 0.5); // discount vs DEX quote (slippage/liquidity)
 const MIN_TOKEN_VALUE = BigInt(process.env.MIN_TOKEN_VALUE || 500_000_000); // only fund-bid boxes worth >0.5 ERG in tokens
+const TOKEN_FEE_MAX = BigInt(process.env.TOKEN_FEE_MAX || 20_000_000);     // 0.02 ERG — absolute ceiling on a token-box bid (past this it's a miner's, unbeatable)
 let ergPerToken = {}; // tokenId -> ERG per DISPLAY unit (from Spectrum)
 
 async function refreshTokenPrices() {
@@ -281,9 +282,19 @@ function p2pkErgoTree(addrB58) {
 // `take` = what WE collect from this box (dust: whole value; funded: the storage fee),
 // so the cap is a share of our actual take, never the box's face value.
 const getBid = (box) => bidFee.get(box.boxId) || FEE;
-function escalateBid(box, take) {
+// Bid ceiling for a box: a share of our take, but for TOKEN boxes also hard-capped at
+// TOKEN_FEE_MAX. A token box can be worth tens of ERG, so BID_MAX_FRACTION alone would let us
+// bid many ERG — but a *contested* token box means a miner is taking it at ZERO cost in their
+// own block, which no mempool fee can beat. So past TOKEN_FEE_MAX we stop (don't burn ERG we
+// can't win with); below it we still out-bid rival *bots* on uncontested-by-miners boxes.
+function capFor(take, kind) {
+  let cap = BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
+  if (kind === 'token' && cap > TOKEN_FEE_MAX) cap = TOKEN_FEE_MAX;
+  return cap;
+}
+function escalateBid(box, take, kind) {
   const cur = getBid(box);
-  const cap = BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
+  const cap = capFor(take, kind);
   let next = BigInt(Math.floor(Number(cur) * BID_ESCALATE));
   if (next > cap) next = cap;
   if (next > cur) bidFee.set(box.boxId, next); // else already at cap — competitor values it more than we can pay
@@ -291,7 +302,7 @@ function escalateBid(box, take) {
 // Pick the fee for a box: max of (escalated floor, just-above any rival in the mempool),
 // capped at a share of our take. Returns { fee, cap, rival } for logging/decisions.
 function chooseFee(box, take, conflicts, kind) {
-  const cap = BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
+  const cap = capFor(take, kind);
   let fee = getBid(box);                                   // floor from prior losses
   const rival = conflicts.get(box.boxId);
   let ourSize = 300;
@@ -370,66 +381,12 @@ async function buildFundedSweep(boxes, height, minerFee = FEE) {
   return { finalTx: { inputs, dataInputs: [], outputs }, outValue: profit, feePaid: minerFee, kept: 0, burned: 0, tokenBoxes: 0, totalFee };
 }
 
-// ---- funded whole-take of a VALUABLE-TOKEN dust box ----
-// The box has ~0 native ERG so it can't pay its own fee; we add a wallet box to fund the
-// fee and keep the tokens. Rent input = empty proof + ctx-var 127; funding input is signed
-// by the wallet via ergo-lib. (New signing path — validate with DRY_RUN /check before live.)
-function buildStateCtx(headers) {
-  const bh = ergoLib.BlockHeaders.from_json(headers);
-  const pre = ergoLib.PreHeader.from_block_header(bh.get(0));
-  return new ergoLib.ErgoStateContext(pre, bh, ergoLib.Parameters.default_parameters());
-}
-// Find one of OUR wallet's unspent boxes big enough to fund a token sweep's fee+change.
-// Primary source is the node's extra index, but most nodes run WITHOUT extraIndex — in which
-// case /blockchain/box/unspent/byAddress doesn't exist (the node returns a MethodRejection).
-// So we fall back to the public explorer to DISCOVER a box id, then re-fetch that box from the
-// node's plain /utxo/byId (available on every node) to get consensus node-format JSON the
-// wasm signer accepts. NOTE: this was the cause of tokenWins never leaving 0 — the only source
-// used to be the extra-index route, so on a non-indexed node funding silently failed every time.
-async function getFundingBox(minValue) {
-  // 1) local node extra index (authoritative node-format JSON, if enabled)
-  try {
-    const r = await fetch(`${NODE_URL}/blockchain/box/unspent/byAddress?limit=20&sortDirection=desc`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'rent-sweeper/1.0' }, body: JSON.stringify(myAddress),
-    });
-    if (r.ok) { const j = await r.json(); const items = j.items || j || []; const box = items.find(b => BigInt(b.value) >= minValue); if (box) return box; }
-  } catch {}
-  // 2) fallback: explorer discovers a fundable boxId (no extraIndex needed); node /utxo/byId
-  //    then gives us the box in node-format and confirms it's still unspent.
-  try {
-    const j = await jget(`${EXPLORER}/api/v1/boxes/unspent/byAddress/${myAddress}?limit=50&sortDirection=desc`, { allow404: true });
-    const items = (j && j.items) || [];
-    const cand = items.find(b => BigInt(b.value) >= minValue && !inFlight.has(b.boxId));
-    if (cand) { const nb = await getUtxo(cand.boxId); if (nb && BigInt(nb.value) >= minValue) return nb; }
-  } catch {}
-  return null;
-}
-async function buildFundedDust(box, height, fee) {
-  const funding = await getFundingBox(fee + 2_000_000n); // enough to cover fee + a change box
-  if (!funding) throw new Error('no wallet funding box (fund the wallet / enable node extra index)');
-  const inBoxes = [box, funding];
-  const outValue = BigInt(box.value) + BigInt(funding.value) - fee;
-  if (outValue < 1_000_000n) throw new Error('funded-dust output below min');
-  const tokMap = new Map();
-  for (const b of inBoxes) for (const a of (b.assets || [])) tokMap.set(a.tokenId, (tokMap.get(a.tokenId) || 0n) + BigInt(a.amount));
-  const assets = [...tokMap].map(([tokenId, amount]) => ({ tokenId, amount: Number(amount) }));
-  const outputs = [
-    { value: Number(outValue), ergoTree: p2pkErgoTree(destAddress), creationHeight: height, assets, additionalRegisters: {} },
-    { value: Number(fee), ergoTree: FEE_TREE, creationHeight: height, assets: [], additionalRegisters: {} },
-  ];
-  const unsignedJson = {
-    inputs: [{ boxId: box.boxId, extension: { '127': EXT_OUTPUT0 } }, { boxId: funding.boxId, extension: {} }],
-    dataInputs: [], outputs,
-  };
-  const unsigned = ergoLib.UnsignedTransaction.from_json(JSON.stringify(unsignedJson));
-  const boxesToSpend = ergoLib.ErgoBoxes.from_boxes_json(inBoxes);
-  const dataBoxes = ergoLib.ErgoBoxes.empty();
-  const stateCtx = buildStateCtx(await jget(`${NODE_URL}/blocks/lastHeaders/10`));
-  const signed = wallet.sign_transaction(stateCtx, unsigned, boxesToSpend, dataBoxes); // signs funding, empty-proofs rent
-  const finalTx = JSON.parse(signed.to_json());
-  const net = BigInt(box.value) + tokenValueNano(box) - fee; // funding ERG returns to us; token value is the gain
-  return { finalTx, outValue: net, feePaid: fee, kept: tokMap.size, burned: 0, tokenBoxes: 1 };
-}
+// NOTE: valuable-token dust boxes are swept via buildSweep() with CO-FUNDING dust inputs
+// (see the token branch in tick()), NOT by signing a wallet funding input. An earlier
+// buildFundedDust() tried wallet.sign_transaction over [rentBox, walletBox]; ergo-lib has no
+// storage-rent prover, so it tried to satisfy the rent box's own script and failed with
+// "Script reduced to false". The empty-proof co-funding path needs no signing and reuses the
+// already-validated buildSweep. Removed to avoid resurrecting the dead approach.
 
 // ==================== BLOCK LOOP ====================
 // Process one built batch: validate (dry-run) or submit (live), update stats.
@@ -457,7 +414,7 @@ async function processBatch(kind, boxes, height, built) {
       const lost = /already spent|double|missing/i.test(e.message);
       if (lost) {
         stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1;
-        for (const b of boxes) escalateBid(b, kind === 'funded' ? storageFee(b) : (kind === 'token' ? BigInt(b.value) + tokenValueNano(b) : BigInt(b.value))); // out-bid next block
+        for (const b of boxes) escalateBid(b, kind === 'funded' ? storageFee(b) : (kind === 'token' ? BigInt(b.value) + tokenValueNano(b) : BigInt(b.value)), kind); // out-bid next block
       } else stats.txsFailed++;
       const reason = e.message.replace(/\s+/g, ' ').replace(/^submit \d+: /, '').slice(0, 160);
       saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
@@ -517,9 +474,10 @@ async function tick() {
     const conflicts = await fetchMempoolConflicts();
     if (VERBOSE) console.log(`[${height}] dust ${dust.length} · funded ${funded.length} · mempool rivals ${conflicts.size}`);
 
-    // One solo tx per box, fired in parallel. `take` = what WE collect (dust: whole
-    // value; funded: the storage fee), which sets both the profit and the bid cap.
-    const attempt = async (kind, box, take, buildFn) => {
+    // One tx per prize box, fired in parallel. `box` drives bidding/logging; `batch` is the
+    // set of inputs actually spent (for token boxes, the prize + co-funding dust). `take` =
+    // what WE collect, which sets both the profit and the bid cap.
+    const attempt = async (kind, box, take, buildFn, batch = [box]) => {
       const { fee, cap, rival, capped, winnable } = chooseFee(box, take, conflicts, kind);
       const net = take - fee;
       const tag = `${kind} ${box.boxId.slice(0, 10)}…`;
@@ -534,30 +492,41 @@ async function tick() {
       }
       if (VERBOSE) console.log(`  BID  ${tag}: take ${(Number(take) / 1e9).toFixed(4)} · fee ${(Number(fee) / 1e9).toFixed(4)}` +
         (rival ? ` vs rival ${(rival.fee / 1e9).toFixed(4)} (w ${rival.weight.toFixed(1)})` : ' (no rival — first in)') + (capped ? ' [CAPPED]' : ''));
-      try { await processBatch(kind, [box], height, await buildFn(fee)); }
+      try { await processBatch(kind, batch, height, await buildFn(fee)); }
       catch (e) {
-        // Build/sign failures (e.g. funded-dust: no wallet funding box, signing error) were
-        // previously console-only and invisible in the log. Record them so token-path issues surface.
+        // Build failures were previously console-only and invisible in the log. Record them.
         logLine({ mode: 'build-failed', kind, boxId: box.boxId, height, error: e.message });
         console.log(`  SKIP ${tag}: build failed — ${e.message}`);
       }
     };
 
     const jobs = [];
+    const reserved = new Set(); // dust boxIds consumed this tick as token co-funders
+    // 1) Valuable-token dust boxes (SigUSD/NETA/RSN): the box holds ~0 ERG, so it can't pay its
+    //    own fee. We CANNOT sign a wallet funding input alongside a storage-rent input (ergo-lib
+    //    tries to satisfy the rent box's script and fails). Instead we CO-FUND the fee from OTHER
+    //    expired whole-takeable dust — every input empty-proof, NO signing — and the tokens
+    //    aggregate into our output. Pursued independent of SWEEP_DUST.
     for (const box of dust) {
       const tv = tokenValueNano(box);
-      if (tv >= MIN_TOKEN_VALUE) {
-        // Valuable-token dust box (e.g. SigUSD/NETA): fund the fee from our wallet, keep the
-        // tokens. ALWAYS pursued — independent of SWEEP_DUST, which only governs the worthless,
-        // hyper-contested PLAIN-dust race. (Nesting this under SWEEP_DUST silently killed the
-        // token path whenever SWEEP_DUST=0 — the cause of tokenWins never leaving 0.)
-        logLine({ mode: 'token-detect', boxId: box.boxId, height, tokenValueNano: tv.toString(), boxValueNano: box.value });
-        if (VERBOSE) console.log(`  💎 TOKEN ${box.boxId.slice(0, 10)}… tokens≈${(Number(tv) / 1e9).toFixed(3)} ERG — pursuing`);
-        jobs.push(attempt('token', box, BigInt(box.value) + tv, fee => buildFundedDust(box, height, fee)));
-      } else if (SWEEP_DUST && BigInt(box.value) > FEE + 1_100_000n) {
-        // plain dust with enough native ERG to self-fund (SWEEP_DUST gates this race)
-        jobs.push(attempt('dust', box, BigInt(box.value), fee => buildSweep([box], height, fee)));
+      if (tv < MIN_TOKEN_VALUE) continue;
+      const batch = [box];
+      let totalIn = BigInt(box.value);
+      for (const cf of dust) { // pull cheap co-funders until we cover fee + min output + buffer
+        if (totalIn - FEE >= 2_000_000n) break;
+        if (cf.boxId === box.boxId || reserved.has(cf.boxId) || tokenValueNano(cf) >= MIN_TOKEN_VALUE) continue;
+        batch.push(cf); totalIn += BigInt(cf.value); reserved.add(cf.boxId);
       }
+      const coFunded = totalIn - FEE >= 2_000_000n;
+      logLine({ mode: 'token-detect', boxId: box.boxId, height, tokenValueNano: tv.toString(), boxValueNano: box.value, coFunders: batch.length - 1, coFunded });
+      if (VERBOSE) console.log(`  💎 TOKEN ${box.boxId.slice(0, 10)}… tokens≈${(Number(tv) / 1e9).toFixed(3)} ERG · co-funders ${batch.length - 1} · in ${(Number(totalIn) / 1e9).toFixed(4)} ERG${coFunded ? '' : ' — INSUFFICIENT co-funding this block, skipping'}`);
+      if (!coFunded) continue; // not enough other dust this block to pay the fee — wait for next
+      jobs.push(attempt('token', box, tv + totalIn, fee => buildSweep(batch, height, fee), batch));
+    }
+    // 2) Plain dust with enough native ERG to self-fund (SWEEP_DUST gates this hyper-contested race)
+    if (SWEEP_DUST) for (const box of dust) {
+      if (reserved.has(box.boxId) || tokenValueNano(box) >= MIN_TOKEN_VALUE) continue;
+      if (BigInt(box.value) > FEE + 1_100_000n) jobs.push(attempt('dust', box, BigInt(box.value), fee => buildSweep([box], height, fee)));
     }
     for (const box of funded) jobs.push(attempt('funded', box, storageFee(box), fee => buildFundedSweep([box], height, fee)));
     await Promise.all(jobs);
