@@ -80,12 +80,22 @@ async function refreshTokenPrices() {
     const r = await fetch('https://api.spectrum.fi/v1/price-tracking/markets', { headers: { 'User-Agent': 'rent-sweeper/1.0' } });
     const mk = await r.json();
     const E = '0000000000000000000000000000000000000000000000000000000000000000';
-    const p = {};
+    // A token can have several ERG pools with divergent lastPrices (e.g. NETA swings 3000x
+    // across its markets). Pick the DEEPEST pool (largest ERG-side volume) per token so the
+    // quote is stable and realistic, rather than whichever market happens to come last.
+    const volOf = (m) => Number((m.baseId === E ? m.baseVolume && m.baseVolume.value : m.quoteVolume && m.quoteVolume.value) || 0);
+    const best = {}; // tokenId -> { price (ERG per display unit), vol }
     for (const m of mk) {
       const lp = m.lastPrice; if (!lp) continue;
-      if (m.baseId === E && TOKEN_DEC[m.quoteId] != null) p[m.quoteId] = 1 / lp;   // token per ERG -> ERG per token
-      if (m.quoteId === E && TOKEN_DEC[m.baseId] != null) p[m.baseId] = lp;
+      let tok = null, price = 0;
+      if (m.baseId === E && TOKEN_DEC[m.quoteId] != null) { tok = m.quoteId; price = 1 / lp; }   // token per ERG -> ERG per token
+      else if (m.quoteId === E && TOKEN_DEC[m.baseId] != null) { tok = m.baseId; price = lp; }   // ERG per token
+      if (!tok) continue;
+      const vol = volOf(m);
+      if (!best[tok] || vol > best[tok].vol) best[tok] = { price, vol };
     }
+    const p = {};
+    for (const t in best) p[t] = best[t].price;
     ergPerToken = p;
   } catch (e) { if (VERBOSE) console.log('  [prices] refresh failed:', e.message); }
 }
@@ -369,12 +379,28 @@ function buildStateCtx(headers) {
   const pre = ergoLib.PreHeader.from_block_header(bh.get(0));
   return new ergoLib.ErgoStateContext(pre, bh, ergoLib.Parameters.default_parameters());
 }
+// Find one of OUR wallet's unspent boxes big enough to fund a token sweep's fee+change.
+// Primary source is the node's extra index, but most nodes run WITHOUT extraIndex — in which
+// case /blockchain/box/unspent/byAddress doesn't exist (the node returns a MethodRejection).
+// So we fall back to the public explorer to DISCOVER a box id, then re-fetch that box from the
+// node's plain /utxo/byId (available on every node) to get consensus node-format JSON the
+// wasm signer accepts. NOTE: this was the cause of tokenWins never leaving 0 — the only source
+// used to be the extra-index route, so on a non-indexed node funding silently failed every time.
 async function getFundingBox(minValue) {
+  // 1) local node extra index (authoritative node-format JSON, if enabled)
   try {
     const r = await fetch(`${NODE_URL}/blockchain/box/unspent/byAddress?limit=20&sortDirection=desc`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'rent-sweeper/1.0' }, body: JSON.stringify(myAddress),
     });
-    if (r.ok) { const j = await r.json(); const items = j.items || j || []; return items.find(b => BigInt(b.value) >= minValue) || null; }
+    if (r.ok) { const j = await r.json(); const items = j.items || j || []; const box = items.find(b => BigInt(b.value) >= minValue); if (box) return box; }
+  } catch {}
+  // 2) fallback: explorer discovers a fundable boxId (no extraIndex needed); node /utxo/byId
+  //    then gives us the box in node-format and confirms it's still unspent.
+  try {
+    const j = await jget(`${EXPLORER}/api/v1/boxes/unspent/byAddress/${myAddress}?limit=50&sortDirection=desc`, { allow404: true });
+    const items = (j && j.items) || [];
+    const cand = items.find(b => BigInt(b.value) >= minValue && !inFlight.has(b.boxId));
+    if (cand) { const nb = await getUtxo(cand.boxId); if (nb && BigInt(nb.value) >= minValue) return nb; }
   } catch {}
   return null;
 }
@@ -509,17 +535,27 @@ async function tick() {
       if (VERBOSE) console.log(`  BID  ${tag}: take ${(Number(take) / 1e9).toFixed(4)} · fee ${(Number(fee) / 1e9).toFixed(4)}` +
         (rival ? ` vs rival ${(rival.fee / 1e9).toFixed(4)} (w ${rival.weight.toFixed(1)})` : ' (no rival — first in)') + (capped ? ' [CAPPED]' : ''));
       try { await processBatch(kind, [box], height, await buildFn(fee)); }
-      catch (e) { console.log(`  SKIP ${tag}: build failed — ${e.message}`); }
+      catch (e) {
+        // Build/sign failures (e.g. funded-dust: no wallet funding box, signing error) were
+        // previously console-only and invisible in the log. Record them so token-path issues surface.
+        logLine({ mode: 'build-failed', kind, boxId: box.boxId, height, error: e.message });
+        console.log(`  SKIP ${tag}: build failed — ${e.message}`);
+      }
     };
 
     const jobs = [];
-    if (SWEEP_DUST) for (const box of dust) {
+    for (const box of dust) {
       const tv = tokenValueNano(box);
       if (tv >= MIN_TOKEN_VALUE) {
-        // valuable-token dust box (e.g. SigUSD/NETA): fund the fee from our wallet, keep the tokens.
+        // Valuable-token dust box (e.g. SigUSD/NETA): fund the fee from our wallet, keep the
+        // tokens. ALWAYS pursued — independent of SWEEP_DUST, which only governs the worthless,
+        // hyper-contested PLAIN-dust race. (Nesting this under SWEEP_DUST silently killed the
+        // token path whenever SWEEP_DUST=0 — the cause of tokenWins never leaving 0.)
+        logLine({ mode: 'token-detect', boxId: box.boxId, height, tokenValueNano: tv.toString(), boxValueNano: box.value });
+        if (VERBOSE) console.log(`  💎 TOKEN ${box.boxId.slice(0, 10)}… tokens≈${(Number(tv) / 1e9).toFixed(3)} ERG — pursuing`);
         jobs.push(attempt('token', box, BigInt(box.value) + tv, fee => buildFundedDust(box, height, fee)));
-      } else if (BigInt(box.value) > FEE + 1_100_000n) {
-        // plain dust with enough native ERG to self-fund
+      } else if (SWEEP_DUST && BigInt(box.value) > FEE + 1_100_000n) {
+        // plain dust with enough native ERG to self-fund (SWEEP_DUST gates this race)
         jobs.push(attempt('dust', box, BigInt(box.value), fee => buildSweep([box], height, fee)));
       }
     }
