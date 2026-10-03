@@ -79,7 +79,7 @@ const MIN_TOKEN_VALUE = BigInt(process.env.MIN_TOKEN_VALUE || 500_000_000); // o
 // own block — nothing can.) Bid climbs from the base FEE only when contested, up to:
 //   min( TOKEN_BID_FRACTION × full token value , TOKEN_FEE_MAX )
 const TOKEN_BID_FRACTION = Number(process.env.TOKEN_BID_FRACTION || 0.7); // pay up to 70% of token value
-const TOKEN_FEE_MAX = BigInt(process.env.TOKEN_FEE_MAX || 10_000_000_000); // 10 ERG hard ceiling per box (price-feed-error backstop)
+const TOKEN_FEE_MAX = BigInt(process.env.TOKEN_FEE_MAX || 300_000_000);   // 0.3 ERG hard ceiling per box — never burn more than this to win one box
 let ergPerToken = {}; // tokenId -> ERG per DISPLAY unit (from Spectrum)
 
 async function refreshTokenPrices() {
