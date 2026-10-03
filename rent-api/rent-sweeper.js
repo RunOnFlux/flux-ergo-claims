@@ -73,7 +73,13 @@ const TOKEN_DEC = {
 };
 const TOKEN_HAIRCUT = Number(process.env.TOKEN_HAIRCUT || 0.5); // discount vs DEX quote (slippage/liquidity)
 const MIN_TOKEN_VALUE = BigInt(process.env.MIN_TOKEN_VALUE || 500_000_000); // only fund-bid boxes worth >0.5 ERG in tokens
-const TOKEN_FEE_MAX = BigInt(process.env.TOKEN_FEE_MAX || 20_000_000);     // 0.02 ERG — absolute ceiling on a token-box bid (past this it's a miner's, unbeatable)
+// How hard to bid for a valuable-token box. We only ever PAY the fee if our tx is the one
+// mined (losers' txs are dropped, cost nothing), so we can safely bid most of the token's
+// value to out-bid rival BOTS. (It still can't beat a miner self-harvesting at 0 fee in their
+// own block — nothing can.) Bid climbs from the base FEE only when contested, up to:
+//   min( TOKEN_BID_FRACTION × full token value , TOKEN_FEE_MAX )
+const TOKEN_BID_FRACTION = Number(process.env.TOKEN_BID_FRACTION || 0.7); // pay up to 70% of token value
+const TOKEN_FEE_MAX = BigInt(process.env.TOKEN_FEE_MAX || 10_000_000_000); // 10 ERG hard ceiling per box (price-feed-error backstop)
 let ergPerToken = {}; // tokenId -> ERG per DISPLAY unit (from Spectrum)
 
 async function refreshTokenPrices() {
@@ -100,12 +106,14 @@ async function refreshTokenPrices() {
     ergPerToken = p;
   } catch (e) { if (VERBOSE) console.log('  [prices] refresh failed:', e.message); }
 }
-// ERG-equivalent (nanoERG, haircut) of allowlisted tokens in a box
-function tokenValueNano(box) {
+// ERG-equivalent (nanoERG) of allowlisted tokens in a box. haircut defaults to TOKEN_HAIRCUT
+// (conservative, for the MIN_TOKEN_VALUE gate); pass haircut=1 for the FULL value used when
+// sizing how much we're willing to bid to win the box.
+function tokenValueNano(box, haircut = TOKEN_HAIRCUT) {
   let v = 0;
   for (const t of (box.assets || [])) {
     const dec = TOKEN_DEC[t.tokenId], price = ergPerToken[t.tokenId];
-    if (dec != null && price) v += (Number(t.amount) / 10 ** dec) * price * TOKEN_HAIRCUT;
+    if (dec != null && price) v += (Number(t.amount) / 10 ** dec) * price * haircut;
   }
   return BigInt(Math.floor(v * 1e9));
 }
@@ -288,9 +296,12 @@ const getBid = (box) => bidFee.get(box.boxId) || FEE;
 // own block, which no mempool fee can beat. So past TOKEN_FEE_MAX we stop (don't burn ERG we
 // can't win with); below it we still out-bid rival *bots* on uncontested-by-miners boxes.
 function capFor(take, kind) {
-  let cap = BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
-  if (kind === 'token' && cap > TOKEN_FEE_MAX) cap = TOKEN_FEE_MAX;
-  return cap;
+  if (kind === 'token') {
+    let cap = BigInt(Math.floor(Number(take) * TOKEN_BID_FRACTION));
+    if (cap > TOKEN_FEE_MAX) cap = TOKEN_FEE_MAX; // hard per-box ceiling (mispriced-token backstop)
+    return cap;
+  }
+  return BigInt(Math.floor(Number(take) * BID_MAX_FRACTION));
 }
 function escalateBid(box, take, kind) {
   const cur = getBid(box);
@@ -414,7 +425,7 @@ async function processBatch(kind, boxes, height, built) {
       const lost = /already spent|double|missing/i.test(e.message);
       if (lost) {
         stats.txsInvalidated++; stats.racesLost = (stats.racesLost || 0) + 1;
-        for (const b of boxes) escalateBid(b, kind === 'funded' ? storageFee(b) : (kind === 'token' ? BigInt(b.value) + tokenValueNano(b) : BigInt(b.value)), kind); // out-bid next block
+        for (const b of boxes) escalateBid(b, kind === 'funded' ? storageFee(b) : (kind === 'token' ? BigInt(b.value) + tokenValueNano(b, 1) : BigInt(b.value)), kind); // out-bid next block (token: full value)
       } else stats.txsFailed++;
       const reason = e.message.replace(/\s+/g, ' ').replace(/^submit \d+: /, '').slice(0, 160);
       saveStats(); logLine({ mode: lost ? 'lost' : 'error', ...rec, error: e.message });
@@ -510,18 +521,27 @@ async function tick() {
     for (const box of dust) {
       const tv = tokenValueNano(box);
       if (tv < MIN_TOKEN_VALUE) continue;
+      const tvFull = tokenValueNano(box, 1);
+      // The fee is paid OUT OF the input ERG (output = Σinputs − fee). A token box holds ~0 ERG,
+      // so to bid a large fee we must gather that many ERG of OTHER expired dust as co-funders.
+      // Gather up to our willing bid (capFor) + min output, best-effort within BATCH_CAP.
+      const wantIn = capFor(tvFull + BigInt(box.value), 'token') + 1_000_000n;
       const batch = [box];
       let totalIn = BigInt(box.value);
-      for (const cf of dust) { // pull cheap co-funders until we cover fee + min output + buffer
-        if (totalIn - FEE >= 2_000_000n) break;
+      for (const cf of dust) {
+        if (totalIn >= wantIn || batch.length >= BATCH_CAP) break;
         if (cf.boxId === box.boxId || reserved.has(cf.boxId) || tokenValueNano(cf) >= MIN_TOKEN_VALUE) continue;
         batch.push(cf); totalIn += BigInt(cf.value); reserved.add(cf.boxId);
       }
-      const coFunded = totalIn - FEE >= 2_000_000n;
-      logLine({ mode: 'token-detect', boxId: box.boxId, height, tokenValueNano: tv.toString(), boxValueNano: box.value, coFunders: batch.length - 1, coFunded });
-      if (VERBOSE) console.log(`  💎 TOKEN ${box.boxId.slice(0, 10)}… tokens≈${(Number(tv) / 1e9).toFixed(3)} ERG · co-funders ${batch.length - 1} · in ${(Number(totalIn) / 1e9).toFixed(4)} ERG${coFunded ? '' : ' — INSUFFICIENT co-funding this block, skipping'}`);
-      if (!coFunded) continue; // not enough other dust this block to pay the fee — wait for next
-      jobs.push(attempt('token', box, tv + totalIn, fee => buildSweep(batch, height, fee), batch));
+      const fundableFee = totalIn - 1_000_000n;      // most this batch can actually pay as fee
+      const coFunded = fundableFee >= FEE;           // at least the base fee
+      logLine({ mode: 'token-detect', boxId: box.boxId, height, tokenValueNano: tv.toString(), boxValueNano: box.value, coFunders: batch.length - 1, totalInNano: totalIn.toString(), fundableFeeNano: fundableFee.toString(), coFunded });
+      if (VERBOSE) console.log(`  💎 TOKEN ${box.boxId.slice(0, 10)}… tokens≈${(Number(tv) / 1e9).toFixed(3)} ERG · co-funders ${batch.length - 1} · in ${(Number(totalIn) / 1e9).toFixed(4)} ERG · max-fundable-fee ${(Number(fundableFee < 0n ? 0n : fundableFee) / 1e9).toFixed(4)} ERG${coFunded ? '' : ' — too little dust to fund the fee this block, skipping'}`);
+      if (!coFunded) continue; // not enough other expired dust this block to pay even the base fee
+      // Bid sizing uses the FULL token value (we only pay the fee IF we win), but the fee is CLAMPED
+      // to what the co-funding dust can actually fund — we can't pay more ERG than we put in.
+      const takeFull = tvFull + totalIn;
+      jobs.push(attempt('token', box, takeFull, fee => buildSweep(batch, height, fee < fundableFee ? fee : fundableFee), batch));
     }
     // 2) Plain dust with enough native ERG to self-fund (SWEEP_DUST gates this hyper-contested race)
     if (SWEEP_DUST) for (const box of dust) {
