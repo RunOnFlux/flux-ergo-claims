@@ -234,8 +234,20 @@ function boxBytesLen(boxJson) {
   const b = ergoLib.ErgoBox.from_json(JSON.stringify(boxJson));
   return b.sigma_serialize_bytes().length;
 }
+// Some on-chain boxes make ergo-lib 0.28 throw "Box id parsed from JSON differs from calculated…"
+// (a serialization edge case). boxBytesLen is only used to size the storage fee / our tx, so on
+// such a box we estimate the size from the JSON rather than letting it kill the whole tick.
+function boxBytesLenSafe(boxJson) {
+  try { return boxBytesLen(boxJson); }
+  catch {
+    const tree = (boxJson.ergoTree || '').length / 2;
+    const regs = JSON.stringify(boxJson.additionalRegisters || {}).length / 2;
+    const toks = (boxJson.assets || []).length * 36;
+    return Math.ceil(tree + regs + toks + 60); // rough but safe-enough for fee classification
+  }
+}
 // storage fee owed by a box (nanoERG) = bytes * storageFeeFactor
-function storageFee(boxJson) { return storageFeeFactor * BigInt(boxBytesLen(boxJson)); }
+function storageFee(boxJson) { return storageFeeFactor * BigInt(boxBytesLenSafe(boxJson)); }
 // whole-takeable iff value <= its storage fee
 function wholeTakeable(boxJson) { return BigInt(boxJson.value) <= storageFee(boxJson); }
 // serialized SShort constant for a small non-negative index (zigzag: n -> 2n; single VLQ byte for n < 64)
@@ -246,7 +258,7 @@ const inFlight = new Map(); // boxId -> height we submitted it; avoids re-target
 async function candidates(height) {
   // rent-api gives collectable boxes network-wide; re-verify each against the UTXO
   // set (still unspent) and classify by whether it's whole-takeable or funded.
-  const diag = { apiReachable: true, collectable: 0, sniped: 0, fundedSkipped: 0, tooSmall: 0, notEligible: 0, inflight: 0 };
+  const diag = { apiReachable: true, collectable: 0, sniped: 0, fundedSkipped: 0, tooSmall: 0, notEligible: 0, inflight: 0, badBox: 0 };
   let d;
   try { d = await jget(`${RENT_API}/rent/boxes?status=collectable&limit=1000`); }
   catch { diag.apiReachable = false; return { dust: [], funded: [], diag }; }
@@ -260,13 +272,16 @@ async function candidates(height) {
   for (const box of boxes) {
     if (dust.length + funded.length >= BATCH_CAP) break;
     if (!box) { diag.sniped++; continue; }       // 404 => spent (mempool-aware)
-    if (box.creationHeight != null && height - box.creationHeight < STORAGE_PERIOD) { diag.notEligible++; continue; }
-    if (wholeTakeable(box)) {                     // value <= fee: take the whole box
-      if (BigInt(box.value) < MIN_BOX_TAKE) { diag.tooSmall++; continue; }
-      dust.push(box);
-    } else if (SWEEP_FUNDED) {                     // value > fee: recreate + collect the fee
-      funded.push(box);
-    } else { diag.fundedSkipped++; }
+    try {
+      // one malformed box must never abort the whole tick (and silently block the token path).
+      if (box.creationHeight != null && height - box.creationHeight < STORAGE_PERIOD) { diag.notEligible++; continue; }
+      if (wholeTakeable(box)) {                   // value <= fee: take the whole box
+        if (BigInt(box.value) < MIN_BOX_TAKE) { diag.tooSmall++; continue; }
+        dust.push(box);
+      } else if (SWEEP_FUNDED) {                   // value > fee: recreate + collect the fee
+        funded.push(box);
+      } else { diag.fundedSkipped++; }
+    } catch (e) { diag.badBox++; if (VERBOSE) console.log(`  [candidates] skip ${String(box.boxId).slice(0, 10)}…: ${e.message}`); }
   }
   return { dust, funded, diag };
 }
@@ -320,7 +335,7 @@ function chooseFee(box, take, conflicts, kind) {
   if (rival) {
     // Ergo replaces on WEIGHT (fee/byte), not fee. Our tx bytes ≈ box bytes (dust) or
     // ~2× (funded recreates the box). Bid to out-weight them for OUR size, +8% margin.
-    const bb = boxBytesLen(box);
+    const bb = boxBytesLenSafe(box);
     ourSize = (kind === 'funded' ? 2 * bb : bb) + 240;
     const beat = BigInt(Math.ceil(rival.weight * ourSize * 1.08)) + 2000n;
     if (beat > fee) fee = beat;
@@ -477,7 +492,7 @@ async function tick() {
     const { dust, funded, diag } = await candidates(height);
     if (!dust.length && !funded.length) {
       if (!diag.apiReachable) console.log(`[${height}] rent-api UNREACHABLE at ${RENT_API} — running on this host? (set RENT_API_URL)`);
-      else console.log(`[${height}] nothing · collectable ${diag.collectable} → funded-skipped ${diag.fundedSkipped}, spent ${diag.sniped}, in-flight ${diag.inflight}, below-min ${diag.tooSmall}, not-eligible ${diag.notEligible}`);
+      else console.log(`[${height}] nothing · collectable ${diag.collectable} → funded-skipped ${diag.fundedSkipped}, spent ${diag.sniped}, in-flight ${diag.inflight}, below-min ${diag.tooSmall}, not-eligible ${diag.notEligible}, bad-box ${diag.badBox}`);
       working = false; return;
     }
 
