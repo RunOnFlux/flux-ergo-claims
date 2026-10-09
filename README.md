@@ -42,7 +42,9 @@ Reference check: internal estimate 484,805.78 vs published 483,623.36 → 0.24% 
 - `evidence/` — box-level CSVs: all vulnerable FLUX boxes, the October exposure window, the
   30-day storage-rent sweep log (12,986 victim boxes), a sample of swept addresses with their prior
   activity, every unspent RSN box with its estimated rent and claimable date, and the before/after
-  state change of every sweep in the log.
+  state change of every sweep in the log. `ergo-block-producers.csv` + `block-share.py`: miner reward
+  address of every block in 1,880,490–1,890,489 (one address produced 53.5%, above 50% in every
+  2,000-block window; top two 76.5%).
 
 ## Snapshot provenance & verification
 

@@ -245,6 +245,55 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--border);bor
       exists. The largest collector operation alone has executed <b>77,532 transactions</b> in its lifetime.</p>
       <p class="highlight">Destruction is a bug; harvesting is an industry.</p>
 
+      <h2>Who decides if you can rescue your own box?</h2>
+      <p>Ergo block production is highly concentrated. Over the last 10,000 blocks (September 25 – October 9),
+      a single miner produced <b>53.5%</b> — a majority in every 2,000-block window — and the top two produced
+      <b>76.5%</b>. Storage-rent harvests appear in essentially every block they mine.</p>
+
+      <div class="stats-grid">
+        <div class="stat"><div class="num">53.5%</div><div class="lbl">Blocks by one miner</div></div>
+        <div class="stat"><div class="num">76.5%</div><div class="lbl">Blocks by top two</div></div>
+        <div class="stat"><div class="num">10,000</div><div class="lbl">Blocks sampled</div></div>
+        <div class="stat"><div class="num">2 weeks</div><div class="lbl">Proposed delay, then tokens still taken</div></div>
+      </div>
+
+      <h3>Ergo's response so far</h3>
+      <ul>
+        <li><b>Shipped — <a href="https://github.com/ergoplatform/ergo/releases/tag/v6.0.7" target="_blank">node 6.0.7</a>
+        (September 29):</b> mainnet nodes no longer relay storage-rent claims. Rent is to be collected by block
+        producers directly, in their own blocks. Consensus is unchanged — an underfunded token box can still be
+        taken whole. It does not protect a single box — it gives block producers the harvest to themselves.
+        The bots are out; the pools are in.</li>
+        <li><b>Proposed — <a href="https://github.com/ergoplatform/eips/pull/110" target="_blank">EIP-53</a>
+        (not activated):</b> a two-week grace period for boxes holding tokens. When it ends, the original rule
+        applies and the tokens can still be taken. Plain ERG dust is unaffected.</li>
+        <li><b>Proposed — <a href="https://github.com/ergoplatform/eips/pull/108" target="_blank">EIP-51</a>
+        (community draft):</b> would let whoever refreshes your box during that grace period keep up to half of
+        each token in it as payment.</li>
+        <li><b>Wallets and SDKs:</b> a storage-rent alert for Nautilus is open, not merged. No warnings have
+        shipped in the Fleet SDK or sigma-rust.</li>
+      </ul>
+      <p><b>None of this removes confiscation. It decides who gets to do it</b> — and the answer is the block
+      producers, one of whom makes more than half of all blocks. Even EIP-53 activates only by majority hashrate
+      — a majority that one miner holds alone. The party that collects the rent decides whether it changes. Our
+      <a href="https://github.com/ergoplatform/eips/pull/107" target="_blank">EIP-0049</a>, which removes the
+      confiscation branch entirely, is still open without a response.</p>
+
+      <p>That creates an incentive problem. A miner earns a few cents for including your rescue transaction —
+      or your entire box for <b>leaving it out</b> and taking the box once it becomes eligible. And a miner with a
+      majority of the hashrate needs no one's cooperation: it can refuse to build on any block that includes a
+      transaction it wants excluded, and out-mine the rest of the network. A single party holding a sustained
+      majority could keep a box from moving until it becomes claimable. We have not observed this happening —
+      but it is a <b>well-incentivized capability</b>: on Ergo today, both the power and the incentive sit with
+      one miner. That is a fundamental flaw of the chain, and no treasury can accept it.</p>
+      <p>Before 6.0.7, we ran a fully protocol-compliant collector and it never won a contested box; under 6.0.7,
+      an independent collector cannot even get a claim relayed. Ergo's own reviewers note that third-party
+      refreshes during the proposed grace period would be blocked the same way, leaving rescues to the miners.</p>
+      <p>Your funds are not protected by your keys; they rest on the goodwill of the people who profit from
+      taking them. See the live pool data in the <a href="#" onclick="document.querySelector('[data-t=watch]').click();return false">RENT WATCH</a> tab.</p>
+      <p class="tiny">Block sample: heights 1,880,490–1,890,489 (September 25 – October 9, 2026), miner reward addresses via
+      api.ergoplatform.com. Ergo releases and proposals as of October 9, 2026.</p>
+
       <h2>What this means for Flux holders</h2>
       <ul>
         <li><b>All funds are safe on Flux and parallel-asset chains</b> thanks to Fusion.</li>
@@ -480,9 +529,12 @@ function loadHarvesters(){fetch(RENT_API+'/rent/harvesters',{cache:'no-store'}).
     <div class="stat"><div class="num" style="color:var(--crit)">${erg(t.harvestFeesNano)}</div><div class="lbl">ERG fees to miners</div></div>
     <div class="stat"><div class="num" style="color:var(--crit)">${(t.irrational||0).toLocaleString()}</div><div class="lbl">irrational-fee (self-harvest)</div></div>
   </div>`;
-  let h='<table><tr><th>miner / pool</th><th>blocks</th><th>with harvest</th><th>harvest txs</th><th>fees (ERG)</th><th>self-harvest⚑</th></tr>';
+  const nb=d.blocksAnalyzed||d.pools.reduce((a,p)=>a+(p.blocksMined||0),0)||1;
+  const top2=d.pools.map(p=>p.blocksMined||0).sort((a,b)=>b-a).slice(0,2).reduce((a,b)=>a+b,0);
+  out.innerHTML+=`<div class="tiny" style="margin:.4rem 0 .6rem"><b>Top two miners produced ${Math.round(100*top2/nb)}% of these ${nb.toLocaleString()} blocks</b> — the same parties decide whether an owner's rescue transaction is included before their box becomes claimable.</div>`;
+  let h='<table><tr><th>miner / pool</th><th>blocks</th><th>block share</th><th>with harvest</th><th>harvest txs</th><th>fees (ERG)</th><th>self-harvest⚑</th></tr>';
   d.pools.slice(0,12).forEach(p=>{const share=p.blocksMined?Math.round(100*p.blocksWithHarvest/p.blocksMined):0;
-    h+=`<tr><td>${p.address?('<a href="https://ergexplorer.com/addresses/'+p.address+'" target="_blank">'+String(p.miner).slice(0,14)+'…</a>'):String(p.miner).slice(0,16)}</td><td>${p.blocksMined}</td><td>${p.blocksWithHarvest} (${share}%)</td><td>${p.harvestTxs}</td><td>${erg(p.harvestFeesNano)}</td><td class="${p.irrationalHarvests>0?'crit':''}">${p.irrationalHarvests}</td></tr>`});
+    h+=`<tr><td>${p.address?('<a href="https://ergexplorer.com/addresses/'+p.address+'" target="_blank">'+String(p.miner).slice(0,14)+'…</a>'):String(p.miner).slice(0,16)}</td><td>${p.blocksMined}</td><td>${Math.round(100*(p.blocksMined||0)/nb)}%</td><td>${p.blocksWithHarvest} (${share}%)</td><td>${p.harvestTxs}</td><td>${erg(p.harvestFeesNano)}</td><td class="${p.irrationalHarvests>0?'crit':''}">${p.irrationalHarvests}</td></tr>`});
   out.innerHTML+=h+'</table>';
   out.innerHTML+=`<div class="tiny" style="margin-top:.6rem">A rent-collection tx paying a fee far above the 0.001 ERG norm hands most of a box's value to the block's miner — <b>only rational if the collector is the miner</b> (the fee returns to them). Pools whose own blocks repeatedly contain such txs are self-harvesting. Blocks ${d.fromHeight}–${d.toHeight} · observed on-chain pattern, presented as data.</div>`;
 }).catch(()=>{document.getElementById('harvester-panel').style.display='none';});}
